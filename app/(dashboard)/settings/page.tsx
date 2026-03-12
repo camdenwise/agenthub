@@ -1,5 +1,6 @@
 'use client'
 
+import { BellIcon as SharedBellIcon } from '@/components/icons/BellIcon'
 import { useState } from 'react'
 
 type SettingsTab =
@@ -10,6 +11,9 @@ type SettingsTab =
   | 'notifications'
   | 'billing'
 
+type ChannelIconKey = 'instagram' | 'facebook' | 'email' | 'website' | 'generic'
+type ApiIconKey = 'meta' | 'resend' | 'mindbody' | 'vagaro' | 'google' | 'stripe' | 'generic'
+
 type ChannelItem = {
   id: string
   name: string
@@ -17,6 +21,7 @@ type ChannelItem = {
   account?: string
   connectedAt?: string
   connected: boolean
+  iconKey: ChannelIconKey
 }
 
 type ApiItem = {
@@ -29,6 +34,7 @@ type ApiItem = {
   reviewLink?: string
   tokenExpires?: string
   lastSync?: string
+  iconKey: ApiIconKey
 }
 
 type WebhookItem = {
@@ -69,20 +75,20 @@ export default function SettingsPage() {
 
   // Channels
   const [channels, setChannels] = useState<ChannelItem[]>([
-    { id: '1', name: 'Instagram DMs', description: 'Receive and respond to Instagram Direct Messages', account: '@irontemple_clt', connectedAt: 'Feb 15, 2026', connected: true },
-    { id: '2', name: 'Facebook Messenger', description: 'Receive and respond to Facebook page messages', account: 'Connected just now', connectedAt: 'Just now', connected: true },
-    { id: '3', name: 'Email (Inbound)', description: 'Receive and respond to customer emails', account: 'hello@irontemple.com', connectedAt: 'Feb 20, 2026', connected: true },
-    { id: '4', name: 'Website Chat Widget', description: 'Embed a chat widget on your website for live AI responses', connected: false },
+    { id: '1', name: 'Instagram DMs', description: 'Receive and respond to Instagram Direct Messages', account: '@irontemple_clt', connectedAt: 'Feb 15, 2026', connected: true, iconKey: 'instagram' },
+    { id: '2', name: 'Facebook Messenger', description: 'Receive and respond to Facebook page messages', account: 'Connected just now', connectedAt: 'Just now', connected: true, iconKey: 'facebook' },
+    { id: '3', name: 'Email (Inbound)', description: 'Receive and respond to customer emails', account: 'hello@irontemple.com', connectedAt: 'Feb 20, 2026', connected: true, iconKey: 'email' },
+    { id: '4', name: 'Website Chat Widget', description: 'Embed a chat widget on your website for live AI responses', connected: false, iconKey: 'website' },
   ])
 
   // API Connections
   const [apis, setApis] = useState<ApiItem[]>([
-    { id: '1', name: 'Meta Graph API', description: 'Powers Instagram DMs and Facebook Messenger.', connected: true, apiKey: 'FABdhc%T***', webhookUrl: 'https://app.agenthub.io/api/webhooks/meta/ig_etc123', tokenExpires: 'May 19, 2026' },
-    { id: '2', name: 'Resend (Email)', description: 'Sends follow-up emails to leads and review requests.', connected: true, apiKey: 'rv_dk2Ufa4***' },
-    { id: '3', name: 'Mindbody', description: 'Syncs visit counts and membership data for review triggers.', connected: true, apiKey: 'im_etthe_12345', webhookUrl: 'https://app.agenthub.io/api/webhooks/mindbody/ig_etc123', lastSync: 'Today 8:00 AM' },
-    { id: '4', name: 'Vagaro', description: 'Alternative booking platform integration.', connected: false },
-    { id: '5', name: 'Google Business Profile', description: 'Review link destination for review request campaigns.', connected: true, reviewLink: 'https://g.page/r/irontemple-clt/review' },
-    { id: '6', name: 'Stripe (Billing)', description: 'Accept payments and manage client subscriptions.', connected: false },
+    { id: '1', name: 'Meta Graph API', description: 'Powers Instagram DMs and Facebook Messenger.', connected: true, apiKey: 'FABdhc%T***', webhookUrl: 'https://app.agenthub.io/api/webhooks/meta/ig_etc123', tokenExpires: 'May 19, 2026', iconKey: 'meta' },
+    { id: '2', name: 'Resend (Email)', description: 'Sends follow-up emails to leads and review requests.', connected: true, apiKey: 'rv_dk2Ufa4***', iconKey: 'resend' },
+    { id: '3', name: 'Mindbody', description: 'Syncs visit counts and membership data for review triggers.', connected: true, apiKey: 'im_etthe_12345', webhookUrl: 'https://app.agenthub.io/api/webhooks/mindbody/ig_etc123', lastSync: 'Today 8:00 AM', iconKey: 'mindbody' },
+    { id: '4', name: 'Vagaro', description: 'Alternative booking platform integration.', connected: false, iconKey: 'vagaro' },
+    { id: '5', name: 'Google Business Profile', description: 'Review link destination for review request campaigns.', connected: true, reviewLink: 'https://g.page/r/irontemple-clt/review', iconKey: 'google' },
+    { id: '6', name: 'Stripe (Billing)', description: 'Accept payments and manage client subscriptions.', connected: false, iconKey: 'stripe' },
   ])
 
   // Webhooks
@@ -105,6 +111,12 @@ export default function SettingsPage() {
   const [notifChannel, setNotifChannel] = useState<'email' | 'sms'>('email')
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null)
 
+  // Modals for Add Channel / API / Webhook
+  const [modalOpen, setModalOpen] = useState<'channel' | 'api' | 'webhook' | null>(null)
+  const [channelForm, setChannelForm] = useState({ name: '', description: '', account: '' })
+  const [apiForm, setApiForm] = useState({ name: '', description: '', apiKey: '', webhookUrl: '', reviewLink: '' })
+  const [webhookForm, setWebhookForm] = useState({ name: '', url: '', type: 'inbound' as 'inbound' | 'outbound' })
+
   function copyToClipboard(text: string, label: string) {
     navigator.clipboard.writeText(text).then(() => {
       setCopyFeedback(label)
@@ -118,11 +130,17 @@ export default function SettingsPage() {
     )
   }
 
-  function addChannel() {
+  function openChannelModal() {
+    setChannelForm({ name: '', description: '', account: '' })
+    setModalOpen('channel')
+  }
+  function saveChannel() {
+    if (!channelForm.name.trim()) return
     setChannels((prev) => [
       ...prev,
-      { id: `new-${Date.now()}`, name: 'New Channel', description: 'Add your channel details', connected: false },
+      { id: `ch-${Date.now()}`, name: channelForm.name.trim(), description: channelForm.description.trim() || 'Add description', account: channelForm.account.trim() || undefined, connected: false, iconKey: 'generic' },
     ])
+    setModalOpen(null)
   }
 
   function toggleApi(id: string) {
@@ -130,19 +148,36 @@ export default function SettingsPage() {
       prev.map((a) => (a.id === id ? { ...a, connected: !a.connected } : a))
     )
   }
-
-  function addApi() {
+  function updateApiField(id: string, field: keyof ApiItem, value: string) {
+    setApis((prev) => prev.map((a) => (a.id === id ? { ...a, [field]: value } : a)))
+  }
+  function openApiModal() {
+    setApiForm({ name: '', description: '', apiKey: '', webhookUrl: '', reviewLink: '' })
+    setModalOpen('api')
+  }
+  function saveApi() {
+    if (!apiForm.name.trim()) return
     setApis((prev) => [
       ...prev,
-      { id: `new-${Date.now()}`, name: 'New API', description: 'Configure your API connection', connected: false },
+      { id: `api-${Date.now()}`, name: apiForm.name.trim(), description: apiForm.description.trim() || 'Configure connection', connected: false, iconKey: 'generic', apiKey: apiForm.apiKey.trim() || undefined, webhookUrl: apiForm.webhookUrl.trim() || undefined, reviewLink: apiForm.reviewLink.trim() || undefined },
     ])
+    setModalOpen(null)
   }
 
-  function addWebhook() {
+  function updateWebhookUrl(id: string, url: string) {
+    setWebhooks((prev) => prev.map((w) => (w.id === id ? { ...w, url } : w)))
+  }
+  function openWebhookModal() {
+    setWebhookForm({ name: '', url: 'https://app.agenthub.io/api/webhooks/', type: 'inbound' })
+    setModalOpen('webhook')
+  }
+  function saveWebhook() {
+    if (!webhookForm.name.trim() || !webhookForm.url.trim()) return
     setWebhooks((prev) => [
       ...prev,
-      { id: `new-${Date.now()}`, name: 'New Webhook', url: 'https://app.agenthub.io/api/webhooks/new', type: 'inbound', active: false, lastReceived: 'Never', totalEvents: 0 },
+      { id: `wh-${Date.now()}`, name: webhookForm.name.trim(), url: webhookForm.url.trim(), type: webhookForm.type, active: false, lastReceived: 'Never', totalEvents: 0 },
     ])
+    setModalOpen(null)
   }
 
   return (
@@ -170,7 +205,7 @@ export default function SettingsPage() {
               {tab.icon === 'chat' && <ChatIcon />}
               {tab.icon === 'link' && <LinkIcon />}
               {tab.icon === 'webhook' && <WebhookIcon />}
-              {tab.icon === 'bell' && <BellIcon />}
+              {tab.icon === 'bell' && <SharedBellIcon className="h-5 w-5" />}
               {tab.icon === 'card' && <CardIcon />}
               {tab.label}
             </button>
@@ -178,7 +213,7 @@ export default function SettingsPage() {
         </nav>
       </div>
 
-      <div className="min-w-0 flex-1 pt-8 lg:pt-0">
+      <div className="min-w-0 flex-1 pt-8 lg:pt-0 max-w-2xl">
         {activeTab === 'business-profile' && (
           <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Business Profile</h2>
@@ -289,7 +324,7 @@ export default function SettingsPage() {
                 >
                   <div className="flex items-start gap-4">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-                      <ChatIcon />
+                      <ChannelIcon key_={ch.iconKey} />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
@@ -312,7 +347,7 @@ export default function SettingsPage() {
                 </div>
               ))}
             </div>
-            <button type="button" onClick={addChannel} className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            <button type="button" onClick={openChannelModal} className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
               + Add new channel
             </button>
           </section>
@@ -328,47 +363,38 @@ export default function SettingsPage() {
               {apis.map((api) => (
                 <div key={api.id} className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="flex gap-4">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600"><LinkIcon /></div>
-                      <div>
-                        <div className="flex items-center gap-2">
+                    <div className="flex gap-4 min-w-0 flex-1">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                        <ApiIcon key_={api.iconKey} />
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium text-slate-900">{api.name}</span>
                           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${api.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
                             {api.connected && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
                             {api.connected ? 'Active' : 'Inactive'}
                           </span>
                         </div>
-                        <p className="mt-0.5 text-sm text-slate-500">{api.description}</p>
-                        {api.connected && (
-                          <div className="mt-3 flex flex-wrap gap-3 text-xs">
-                            {api.apiKey && (
-                              <span className="flex items-center gap-1">
-                                API KEY: <code className="rounded bg-slate-100 px-1.5 py-0.5">{api.apiKey}</code>
-                                <button type="button" onClick={() => copyToClipboard(api.apiKey!, `${api.name} key`)} className="text-indigo-600 hover:underline">
-                                  Copy
-                                </button>
-                              </span>
-                            )}
-                            {api.webhookUrl && (
-                              <span className="flex items-center gap-1">
-                                WEBHOOK URL: <code className="max-w-[180px] truncate rounded bg-slate-100 px-1.5 py-0.5">{api.webhookUrl}</code>
-                                <button type="button" onClick={() => copyToClipboard(api.webhookUrl!, `${api.name} webhook`)} className="text-indigo-600 hover:underline">
-                                  Copy
-                                </button>
-                              </span>
-                            )}
-                            {api.reviewLink && (
-                              <span className="flex items-center gap-1">
-                                REVIEW LINK: <code className="max-w-[180px] truncate rounded bg-slate-100 px-1.5 py-0.5">{api.reviewLink}</code>
-                                <button type="button" onClick={() => copyToClipboard(api.reviewLink!, 'Review link')} className="text-indigo-600 hover:underline">
-                                  Copy
-                                </button>
-                              </span>
-                            )}
-                            {api.tokenExpires && <span>TOKEN EXPIRES: {api.tokenExpires}</span>}
-                            {api.lastSync && <span>LAST SYNC: {api.lastSync} <button type="button" className="text-indigo-600 hover:underline">Sync now</button></span>}
+                        <p className="text-sm text-slate-500">{api.description}</p>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label className="w-20 shrink-0 text-slate-500">API Key</label>
+                            <input type="text" value={api.apiKey ?? ''} onChange={(e) => updateApiField(api.id, 'apiKey', e.target.value)} placeholder="Optional" className="min-w-0 flex-1 max-w-xs rounded border border-slate-200 px-2 py-1 text-slate-900" />
+                            {api.apiKey && <button type="button" onClick={() => copyToClipboard(api.apiKey!, 'key')} className="text-indigo-600 hover:underline text-xs">Copy</button>}
                           </div>
-                        )}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label className="w-20 shrink-0 text-slate-500">Webhook URL</label>
+                            <input type="text" value={api.webhookUrl ?? ''} onChange={(e) => updateApiField(api.id, 'webhookUrl', e.target.value)} placeholder="Optional" className="min-w-0 flex-1 max-w-xs rounded border border-slate-200 px-2 py-1 text-slate-900 font-mono text-xs" />
+                            {api.webhookUrl && <button type="button" onClick={() => copyToClipboard(api.webhookUrl!, 'webhook')} className="text-indigo-600 hover:underline text-xs">Copy</button>}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label className="w-20 shrink-0 text-slate-500">Review link</label>
+                            <input type="text" value={api.reviewLink ?? ''} onChange={(e) => updateApiField(api.id, 'reviewLink', e.target.value)} placeholder="Optional" className="min-w-0 flex-1 max-w-xs rounded border border-slate-200 px-2 py-1 text-slate-900 font-mono text-xs" />
+                            {api.reviewLink && <button type="button" onClick={() => copyToClipboard(api.reviewLink!, 'link')} className="text-indigo-600 hover:underline text-xs">Copy</button>}
+                          </div>
+                          {api.tokenExpires && <p className="text-xs text-slate-500">Token expires: {api.tokenExpires}</p>}
+                          {api.lastSync && <p className="text-xs text-slate-500">Last sync: {api.lastSync} <button type="button" className="text-indigo-600 hover:underline">Sync now</button></p>}
+                        </div>
                       </div>
                     </div>
                     <button
@@ -382,7 +408,7 @@ export default function SettingsPage() {
                 </div>
               ))}
             </div>
-            <button type="button" onClick={addApi} className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            <button type="button" onClick={openApiModal} className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
               + Add new API
             </button>
             {copyFeedback && <p className="text-sm text-emerald-600">Copied {copyFeedback} to clipboard.</p>}
@@ -393,27 +419,28 @@ export default function SettingsPage() {
           <section className="space-y-4">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Webhooks</h2>
-              <p className="mt-1 text-sm text-slate-500">Endpoint URLs that receive or send event data. Copy these into your external services.</p>
+              <p className="mt-1 text-sm text-slate-500">Endpoint URLs that receive or send event data. Copy or edit below.</p>
             </div>
             <div className="space-y-3">
               {webhooks.map((wh) => (
-                <div key={wh.id} className="flex flex-col gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-slate-900">{wh.name}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${wh.type === 'inbound' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>{wh.type === 'inbound' ? 'Inbound' : 'Outbound'}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${wh.active ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>{wh.active ? 'Active' : 'Inactive'}</span>
-                    </div>
-                    <p className="mt-2 font-mono text-sm text-slate-600 break-all">{wh.url}</p>
-                    <p className="mt-1 text-xs text-slate-500">Last received: {wh.lastReceived} · Total events: {wh.totalEvents}</p>
+                <div key={wh.id} className="flex flex-col gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-slate-900">{wh.name}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${wh.type === 'inbound' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>{wh.type === 'inbound' ? 'Inbound' : 'Outbound'}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${wh.active ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>{wh.active ? 'Active' : 'Inactive'}</span>
                   </div>
-                  <button type="button" onClick={() => copyToClipboard(wh.url, 'URL')} className="shrink-0 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                    Copy URL
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-sm text-slate-500 shrink-0">URL</label>
+                    <input type="text" value={wh.url} onChange={(e) => updateWebhookUrl(wh.id, e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900" placeholder="https://..." />
+                    <button type="button" onClick={() => copyToClipboard(wh.url, 'URL')} className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                      Copy URL
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500">Last received: {wh.lastReceived} · Total events: {wh.totalEvents}</p>
                 </div>
               ))}
             </div>
-            <button type="button" onClick={addWebhook} className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            <button type="button" onClick={openWebhookModal} className="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
               + Add new webhook
             </button>
             <div className="rounded-xl border border-indigo-200 bg-indigo-500/5 p-4 flex gap-3">
@@ -483,20 +510,20 @@ export default function SettingsPage() {
               <h2 className="text-lg font-semibold text-slate-900">Billing</h2>
               <p className="mt-1 text-sm text-slate-500">Manage your subscription and payment details.</p>
             </div>
-            <div className="rounded-2xl bg-indigo-600 p-6 text-white">
+            <div className="w-full max-w-md rounded-2xl bg-indigo-600 p-5 text-white">
               <p className="text-sm font-medium opacity-90">Current Plan</p>
-              <p className="mt-1 text-xl font-bold">Growth Plan</p>
+              <p className="mt-1 text-lg font-bold">Growth Plan</p>
               <p className="mt-1 text-sm opacity-90">$400/month — All 3 AI agents, unlimited messages</p>
               <p className="mt-3 text-xs opacity-80">Next billing: Apr 1, 2026 · Status: Active</p>
             </div>
-            <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+            <div className="max-w-md rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
               <h3 className="font-semibold text-slate-900">Payment method</h3>
               <p className="mt-1 text-sm text-slate-500">Add or update the card used for billing.</p>
               <button type="button" className="mt-4 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500">
                 Add payment method
               </button>
             </div>
-            <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+            <div className="max-w-md rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
               <h3 className="font-semibold text-slate-900">Usage This Month</h3>
               <ul className="mt-4 space-y-2 text-sm">
                 <li className="flex justify-between"><span className="text-slate-600">AI Messages Processed</span><span className="font-medium text-slate-900">847 / Unlimited</span></li>
@@ -507,6 +534,97 @@ export default function SettingsPage() {
             </div>
           </section>
         )}
+      </div>
+
+      {/* Modals */}
+      {modalOpen === 'channel' && (
+        <Modal title="Add channel" onClose={() => setModalOpen(null)}>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Name</label>
+              <input type="text" value={channelForm.name} onChange={(e) => setChannelForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Instagram DMs" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Description</label>
+              <input type="text" value={channelForm.description} onChange={(e) => setChannelForm((f) => ({ ...f, description: e.target.value }))} placeholder="What this channel does" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Account (optional)</label>
+              <input type="text" value={channelForm.account} onChange={(e) => setChannelForm((f) => ({ ...f, account: e.target.value }))} placeholder="e.g. @handle or email" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900" />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setModalOpen(null)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+              <button type="button" onClick={saveChannel} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Add</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {modalOpen === 'api' && (
+        <Modal title="Add API connection" onClose={() => setModalOpen(null)}>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Name</label>
+              <input type="text" value={apiForm.name} onChange={(e) => setApiForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Meta Graph API" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Description</label>
+              <input type="text" value={apiForm.description} onChange={(e) => setApiForm((f) => ({ ...f, description: e.target.value }))} placeholder="What this API does" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">API Key (optional)</label>
+              <input type="text" value={apiForm.apiKey} onChange={(e) => setApiForm((f) => ({ ...f, apiKey: e.target.value }))} placeholder="Paste API key" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Webhook URL (optional)</label>
+              <input type="text" value={apiForm.webhookUrl} onChange={(e) => setApiForm((f) => ({ ...f, webhookUrl: e.target.value }))} placeholder="https://..." className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Review link (optional)</label>
+              <input type="text" value={apiForm.reviewLink} onChange={(e) => setApiForm((f) => ({ ...f, reviewLink: e.target.value }))} placeholder="https://..." className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900" />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setModalOpen(null)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+              <button type="button" onClick={saveApi} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Add</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {modalOpen === 'webhook' && (
+        <Modal title="Add webhook" onClose={() => setModalOpen(null)}>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Name</label>
+              <input type="text" value={webhookForm.name} onChange={(e) => setWebhookForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Website Contact Form" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">URL</label>
+              <input type="text" value={webhookForm.url} onChange={(e) => setWebhookForm((f) => ({ ...f, url: e.target.value }))} placeholder="https://app.agenthub.io/api/webhooks/..." className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Type</label>
+              <select value={webhookForm.type} onChange={(e) => setWebhookForm((f) => ({ ...f, type: e.target.value as 'inbound' | 'outbound' }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900">
+                <option value="inbound">Inbound</option>
+                <option value="outbound">Outbound</option>
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setModalOpen(null)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+              <button type="button" onClick={saveWebhook} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Add</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/50" onClick={onClose} aria-hidden />
+      <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" role="dialog" aria-modal aria-labelledby="modal-title">
+        <h2 id="modal-title" className="text-lg font-semibold text-slate-900">{title}</h2>
+        <div className="mt-4">{children}</div>
       </div>
     </div>
   )
@@ -554,13 +672,26 @@ function WebhookIcon() {
     </svg>
   )
 }
-function BellIcon() {
-  return (
-    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75v-.7a9 9 0 0 0 3-3.5 9 9 0 0 0-18 0 9 9 0 0 0 3 3.5v.7a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
-    </svg>
-  )
+
+function ChannelIcon({ key_ }: { key_: ChannelIconKey }) {
+  const c = 'h-5 w-5 shrink-0'
+  if (key_ === 'instagram') return <svg className={c} viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0z" /></svg>
+  if (key_ === 'facebook') return <svg className={c} viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" /></svg>
+  if (key_ === 'email') return <svg className={c} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg>
+  if (key_ === 'website') return <svg className={c} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" /></svg>
+  return <ChatIcon />
 }
+
+function ApiIcon({ key_ }: { key_: ApiIconKey }) {
+  const c = 'h-5 w-5 shrink-0'
+  if (key_ === 'meta') return <svg className={c} viewBox="0 0 24 24" fill="#1877F2" aria-hidden><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" /></svg>
+  if (key_ === 'resend') return <svg className={c} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg>
+  if (key_ === 'mindbody' || key_ === 'vagaro') return <svg className={c} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25a2.25 2.25 0 0 0 2.25 2.25h13.5A2.25 2.25 0 0 0 21.75 14.25V3m-18 0h18M5.25 3h.75m-.75 0h-.75m.75 0v.75m-.75 0h.75m-.75 0h.75m.75-3h.75m-.75 0h-.75m.75 0v.75m-.75 0h.75M5.25 9h.75m-.75 0h-.75m.75 0v6.75m-.75 0h.75m-.75 0h.75" /></svg>
+  if (key_ === 'google') return <svg className={c} viewBox="0 0 24 24" aria-hidden><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+  if (key_ === 'stripe') return <svg className={c} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z" /></svg>
+  return <LinkIcon />
+}
+
 function CardIcon() {
   return (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
