@@ -380,18 +380,20 @@ export default function SettingsPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <label className="w-20 shrink-0 text-slate-500">API Key</label>
                             <input type="text" value={api.apiKey ?? ''} onChange={(e) => updateApiField(api.id, 'apiKey', e.target.value)} placeholder="Optional" className="min-w-0 flex-1 max-w-xs rounded border border-slate-200 px-2 py-1 text-slate-900" />
-                            {api.apiKey && <button type="button" onClick={() => copyToClipboard(api.apiKey!, 'key')} className="text-indigo-600 hover:underline text-xs">Copy</button>}
+                            {api.apiKey && <button type="button" onClick={() => copyToClipboard(api.apiKey!, 'key')} className="text-indigo-600 hover:underline text-xs cursor-pointer">Copy</button>}
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
                             <label className="w-20 shrink-0 text-slate-500">Webhook URL</label>
                             <input type="text" value={api.webhookUrl ?? ''} onChange={(e) => updateApiField(api.id, 'webhookUrl', e.target.value)} placeholder="Optional" className="min-w-0 flex-1 max-w-xs rounded border border-slate-200 px-2 py-1 text-slate-900 font-mono text-xs" />
-                            {api.webhookUrl && <button type="button" onClick={() => copyToClipboard(api.webhookUrl!, 'webhook')} className="text-indigo-600 hover:underline text-xs">Copy</button>}
+                            {api.webhookUrl && <button type="button" onClick={() => copyToClipboard(api.webhookUrl!, 'webhook')} className="text-indigo-600 hover:underline text-xs cursor-pointer">Copy</button>}
                           </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <label className="w-20 shrink-0 text-slate-500">Review link</label>
-                            <input type="text" value={api.reviewLink ?? ''} onChange={(e) => updateApiField(api.id, 'reviewLink', e.target.value)} placeholder="Optional" className="min-w-0 flex-1 max-w-xs rounded border border-slate-200 px-2 py-1 text-slate-900 font-mono text-xs" />
-                            {api.reviewLink && <button type="button" onClick={() => copyToClipboard(api.reviewLink!, 'link')} className="text-indigo-600 hover:underline text-xs">Copy</button>}
-                          </div>
+                          {api.iconKey === 'google' && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <label className="w-20 shrink-0 text-slate-500">Review link</label>
+                              <input type="text" value={api.reviewLink ?? ''} onChange={(e) => updateApiField(api.id, 'reviewLink', e.target.value)} placeholder="Google Business review URL" className="min-w-0 flex-1 max-w-xs rounded border border-slate-200 px-2 py-1 text-slate-900 font-mono text-xs" />
+                              {api.reviewLink && <button type="button" onClick={() => copyToClipboard(api.reviewLink!, 'link')} className="text-indigo-600 hover:underline text-xs cursor-pointer">Copy</button>}
+                            </div>
+                          )}
                           {api.tokenExpires && <p className="text-xs text-slate-500">Token expires: {api.tokenExpires}</p>}
                           {api.lastSync && <p className="text-xs text-slate-500">Last sync: {api.lastSync} <button type="button" className="text-indigo-600 hover:underline">Sync now</button></p>}
                         </div>

@@ -132,7 +132,7 @@ export default async function DashboardPage() {
       <div className="mt-6 flex flex-col gap-6 lg:flex-row">
         <Link
           href="/messages"
-          className="block min-w-0 flex-1 rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-shadow duration-200 hover:shadow-md cursor-pointer"
+          className="block min-w-0 flex-1 rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-all duration-200 hover:-translate-y-[2px] hover:shadow-md cursor-pointer"
         >
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
             <h2 className="font-semibold text-slate-900">Recent Messages</h2>
@@ -156,7 +156,7 @@ export default async function DashboardPage() {
 
         <Link
           href="/leads"
-          className="block min-w-0 flex-1 rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-shadow duration-200 hover:shadow-md cursor-pointer"
+          className="block min-w-0 flex-1 rounded-2xl border border-slate-200/80 bg-white shadow-sm transition-all duration-200 hover:-translate-y-[2px] hover:shadow-md cursor-pointer"
         >
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
             <h2 className="font-semibold text-slate-900">Lead Pipeline</h2>
