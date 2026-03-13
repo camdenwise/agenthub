@@ -117,6 +117,9 @@ export default function SettingsPage() {
   const [apiForm, setApiForm] = useState({ name: '', description: '', apiKey: '', webhookUrl: '', reviewLink: '' })
   const [webhookForm, setWebhookForm] = useState({ name: '', url: '', type: 'inbound' as 'inbound' | 'outbound' })
 
+  // Remove confirmation: { type, id, name }
+  const [removeConfirm, setRemoveConfirm] = useState<{ type: 'channel' | 'api' | 'webhook'; id: string; name: string } | null>(null)
+
   function copyToClipboard(text: string, label: string) {
     navigator.clipboard.writeText(text).then(() => {
       setCopyFeedback(label)
@@ -142,6 +145,10 @@ export default function SettingsPage() {
     ])
     setModalOpen(null)
   }
+  function removeChannel(id: string) {
+    setChannels((prev) => prev.filter((c) => c.id !== id))
+    setRemoveConfirm(null)
+  }
 
   function toggleApi(id: string) {
     setApis((prev) =>
@@ -163,6 +170,10 @@ export default function SettingsPage() {
     ])
     setModalOpen(null)
   }
+  function removeApi(id: string) {
+    setApis((prev) => prev.filter((a) => a.id !== id))
+    setRemoveConfirm(null)
+  }
 
   function updateWebhookUrl(id: string, url: string) {
     setWebhooks((prev) => prev.map((w) => (w.id === id ? { ...w, url } : w)))
@@ -178,6 +189,16 @@ export default function SettingsPage() {
       { id: `wh-${Date.now()}`, name: webhookForm.name.trim(), url: webhookForm.url.trim(), type: webhookForm.type, active: false, lastReceived: 'Never', totalEvents: 0 },
     ])
     setModalOpen(null)
+  }
+  function removeWebhook(id: string) {
+    setWebhooks((prev) => prev.filter((w) => w.id !== id))
+    setRemoveConfirm(null)
+  }
+  function confirmRemove() {
+    if (!removeConfirm) return
+    if (removeConfirm.type === 'channel') removeChannel(removeConfirm.id)
+    else if (removeConfirm.type === 'api') removeApi(removeConfirm.id)
+    else removeWebhook(removeConfirm.id)
   }
 
   return (
@@ -337,13 +358,22 @@ export default function SettingsPage() {
                       {ch.account && <p className="mt-1 text-xs text-slate-500">Account: {ch.account} {ch.connectedAt && `- connected ${ch.connectedAt}`}</p>}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => toggleChannel(ch.id)}
-                    className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium ${ch.connected ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}
-                  >
-                    {ch.connected ? 'Disconnect' : 'Connect'}
-                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleChannel(ch.id)}
+                      className={`rounded-lg px-4 py-2 text-sm font-medium ${ch.connected ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}
+                    >
+                      {ch.connected ? 'Disconnect' : 'Connect'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRemoveConfirm({ type: 'channel', id: ch.id, name: ch.name })}
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-red-50 hover:border-red-200 hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -399,13 +429,22 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => toggleApi(api.id)}
-                      className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium ${api.connected ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}
-                    >
-                      {api.connected ? 'Disconnect' : 'Connect'}
-                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleApi(api.id)}
+                        className={`rounded-lg px-4 py-2 text-sm font-medium ${api.connected ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}
+                      >
+                        {api.connected ? 'Disconnect' : 'Connect'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRemoveConfirm({ type: 'api', id: api.id, name: api.name })}
+                        className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-red-50 hover:border-red-200 hover:text-red-700"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -431,12 +470,23 @@ export default function SettingsPage() {
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${wh.type === 'inbound' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>{wh.type === 'inbound' ? 'Inbound' : 'Outbound'}</span>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${wh.active ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>{wh.active ? 'Active' : 'Inactive'}</span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="text-sm text-slate-500 shrink-0">URL</label>
-                    <input type="text" value={wh.url} onChange={(e) => updateWebhookUrl(wh.id, e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900" placeholder="https://..." />
-                    <button type="button" onClick={() => copyToClipboard(wh.url, 'URL')} className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                      Copy URL
-                    </button>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="text-sm text-slate-500 shrink-0">URL</label>
+                      <input type="text" value={wh.url} onChange={(e) => updateWebhookUrl(wh.id, e.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-slate-900" placeholder="https://..." />
+                      <button type="button" onClick={() => copyToClipboard(wh.url, 'URL')} className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                        Copy URL
+                      </button>
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setRemoveConfirm({ type: 'webhook', id: wh.id, name: wh.name })}
+                        className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-red-50 hover:border-red-200 hover:text-red-700"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
                   <p className="text-xs text-slate-500">Last received: {wh.lastReceived} · Total events: {wh.totalEvents}</p>
                 </div>
@@ -591,6 +641,31 @@ export default function SettingsPage() {
           </div>
         </Modal>
       )}
+      {/* Remove confirmation modal */}
+      {removeConfirm && (
+        <Modal title="Remove connection" onClose={() => setRemoveConfirm(null)}>
+          <p className="text-slate-600">
+            Are you sure you want to remove &quot;{removeConfirm.name}&quot;?
+          </p>
+          <div className="mt-6 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setRemoveConfirm(null)}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmRemove}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
+            >
+              Remove
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {modalOpen === 'webhook' && (
         <Modal title="Add webhook" onClose={() => setModalOpen(null)}>
           <div className="space-y-4">
