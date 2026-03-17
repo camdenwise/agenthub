@@ -1,110 +1,67 @@
 'use client'
 
 import { BellIcon } from '@/components/icons/BellIcon'
-import { useState } from 'react'
+import { createClient } from '@/lib/supabase'
+import { useEffect, useRef, useState } from 'react'
 
-type Channel = 'instagram' | 'facebook' | 'email'
-type Status = 'needs_human' | 'resolved'
+type Channel = 'instagram' | 'facebook' | 'email' | 'web_chat'
+type ConvoStatus = 'active' | 'needs_human' | 'resolved' | 'spam'
 
-type Conversation = {
+type DBConversation = {
   id: string
-  customerName: string
-  initials: string
-  avatarColor: string
-  lastMessagePreview: string
-  timestamp: string
   channel: Channel
-  status: Status
+  customer_name: string
+  status: ConvoStatus
+  messages: { role: string; content: string; time: string; confidence?: string }[]
+  created_at: string
+  updated_at: string
 }
 
 type ChatMessage = {
-  id: string
-  sender: 'customer' | 'ai'
-  text: string
+  role: string
+  content: string
   time: string
-  unsure?: boolean
+  confidence?: string
 }
 
 const CHANNEL_LABELS: Record<Channel, string> = {
   instagram: 'Instagram',
   facebook: 'Facebook',
   email: 'Email',
+  web_chat: 'Website',
 }
 
-const MOCK_CONVERSATIONS: Conversation[] = [
-  {
-    id: '1',
-    customerName: 'Sarah Mitchell',
-    initials: 'SM',
-    avatarColor: 'bg-pink-500/15 text-pink-800',
-    lastMessagePreview: 'Do you have any beginner-friendly classes?',
-    timestamp: '2 min ago',
-    channel: 'instagram',
-    status: 'resolved',
-  },
-  {
-    id: '2',
-    customerName: 'James Rodriguez',
-    initials: 'JR',
-    avatarColor: 'bg-indigo-500/15 text-indigo-800',
-    lastMessagePreview: 'What time do your spin classes start?',
-    timestamp: '18 min ago',
-    channel: 'facebook',
-    status: 'needs_human',
-  },
-  {
-    id: '3',
-    customerName: 'Maria Santos',
-    initials: 'MS',
-    avatarColor: 'bg-emerald-500/15 text-emerald-800',
-    lastMessagePreview: 'Thanks, that was really helpful!',
-    timestamp: '1 hr ago',
-    channel: 'email',
-    status: 'resolved',
-  },
-  {
-    id: '4',
-    customerName: 'Alex Chen',
-    initials: 'AC',
-    avatarColor: 'bg-amber-500/15 text-amber-800',
-    lastMessagePreview: 'Can I get a trial pass for this weekend?',
-    timestamp: '2 hr ago',
-    channel: 'instagram',
-    status: 'resolved',
-  },
-]
+function getInitials(name: string) {
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2)
+}
 
-const MOCK_THREADS: Record<string, ChatMessage[]> = {
-  '1': [
-    { id: 'm1', sender: 'customer', text: 'Do you have any beginner-friendly classes?', time: '9:42 AM' },
-    { id: 'm2', sender: 'ai', text: 'Yes! We have Yoga Basics on Tuesday and Thursday at 10am, and Gentle Flow on Monday at 6pm. Would you like to try a drop-in?', time: '9:43 AM' },
-    { id: 'm3', sender: 'customer', text: 'Yoga Basics sounds perfect. How do I sign up?', time: '9:44 AM' },
-    { id: 'm4', sender: 'ai', text: 'You can book online through our app or just show up and pay at the front desk. First class is half price for new members!', time: '9:44 AM' },
-  ],
-  '2': [
-    {
-      id: 'm5',
-      sender: 'customer',
-      text: "Hi, I'm the HR director at Lumen Technologies. Do you offer corporate wellness programs or group rates for employees?",
-      time: '9:45 AM',
-    },
-    {
-      id: 'm6',
-      sender: 'ai',
-      text: "That's a great question! I'm not sure about specific corporate programs, but let me get someone from our team to reach out to you directly.",
-      time: '9:46 AM',
-      unsure: true,
-    },
-  ],
-  '3': [
-    { id: 'm7', sender: 'customer', text: 'What are your opening hours?', time: '8:30 AM' },
-    { id: 'm8', sender: 'ai', text: 'We’re open Mon–Fri 5am–10pm and Sat–Sun 6am–8pm. Holiday hours may vary.', time: '8:31 AM' },
-    { id: 'm9', sender: 'customer', text: 'Thanks, that was really helpful!', time: '8:32 AM' },
-  ],
-  '4': [
-    { id: 'm10', sender: 'customer', text: 'Can I get a trial pass for this weekend?', time: 'Yesterday' },
-    { id: 'm11', sender: 'ai', text: 'Absolutely! We offer a 3-day trial for $25. You can sign up at the front desk or online. Bring a valid ID.', time: 'Yesterday' },
-  ],
+function getAvatarColor(channel: Channel) {
+  switch (channel) {
+    case 'instagram':
+      return 'bg-pink-500/15 text-pink-800'
+    case 'facebook':
+      return 'bg-indigo-500/15 text-indigo-800'
+    case 'email':
+      return 'bg-violet-500/15 text-violet-800'
+    default:
+      return 'bg-emerald-500/15 text-emerald-800'
+  }
+}
+
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins} min ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs} hr ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
 }
 
 function ChannelIcon({ channel }: { channel: Channel }) {
@@ -131,32 +88,174 @@ function ChannelIcon({ channel }: { channel: Channel }) {
 }
 
 export default function MessagesPage() {
-  const [selectedId, setSelectedId] = useState<string>(MOCK_CONVERSATIONS[0].id)
+  const [conversations, setConversations] = useState<DBConversation[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
-  const [threads, setThreads] = useState<Record<string, ChatMessage[]>>(MOCK_THREADS)
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
+  const [businessId, setBusinessId] = useState<string | null>(null)
+  const endRef = useRef<HTMLDivElement>(null)
 
-  const selected = MOCK_CONVERSATIONS.find((c) => c.id === selectedId) ?? MOCK_CONVERSATIONS[0]
-  const messages = threads[selectedId] ?? []
+  const supabase = createClient()
 
-  function handleSend() {
-    if (!inputValue.trim()) return
-    const newCustomerMsg: ChatMessage = {
-      id: `new-${Date.now()}`,
-      sender: 'customer',
-      text: inputValue.trim(),
-      time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+  // Load conversations on mount
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+
+      // Get current user's business
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data: business } = await supabase
+        .from('businesses')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (!business) {
+        setLoading(false)
+        return
+      }
+
+      setBusinessId(business.id)
+
+      // Fetch conversations
+      const { data: convos } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('business_id', business.id)
+        .order('updated_at', { ascending: false })
+
+      if (convos && convos.length > 0) {
+        setConversations(convos)
+        setSelectedId(convos[0].id)
+      }
+
+      setLoading(false)
     }
-    const newAiMsg: ChatMessage = {
-      id: `new-ai-${Date.now()}`,
-      sender: 'ai',
-      text: "Thanks for your message. This is a test reply — we'll connect this to your AI when you're ready.",
-      time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
-    }
-    setThreads((prev) => ({
-      ...prev,
-      [selectedId]: [...(prev[selectedId] ?? []), newCustomerMsg, newAiMsg],
-    }))
+
+    load()
+  }, [])
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [selectedId, conversations])
+
+  const selected = conversations.find((c) => c.id === selectedId)
+  const messages: ChatMessage[] = selected?.messages ?? []
+
+  // Get the last message text for the conversation list preview
+  function getLastMessage(convo: DBConversation) {
+    const msgs = convo.messages ?? []
+    if (msgs.length === 0) return 'No messages'
+    return msgs[msgs.length - 1].content
+  }
+
+  async function handleSend() {
+    if (!inputValue.trim() || sending || !selected || !businessId) return
+
+    const msg = inputValue.trim()
     setInputValue('')
+    setSending(true)
+
+    // Optimistically add the customer message
+    const customerMsg: ChatMessage = {
+      role: 'customer',
+      content: msg,
+      time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+    }
+
+    const updatedMessages = [...messages, customerMsg]
+
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === selected.id ? { ...c, messages: updatedMessages, updated_at: new Date().toISOString() } : c
+      )
+    )
+
+    try {
+      // Call the AI engine API
+      const res = await fetch('/api/ai/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'dm',
+          businessId,
+          conversationId: selected.id,
+          conversationHistory: messages,
+          newMessage: msg,
+          channel: selected.channel,
+          customerName: selected.customer_name,
+        }),
+      })
+
+      const result = await res.json()
+
+      if (result.isSpam) {
+        // Mark as spam in the local state
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === selected.id ? { ...c, status: 'spam' as ConvoStatus } : c
+          )
+        )
+      } else {
+        // Add the AI response
+        const aiMsg: ChatMessage = {
+          role: 'agent',
+          content: result.content,
+          time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+          confidence: result.confidence,
+        }
+
+        const finalMessages = [...updatedMessages, aiMsg]
+        const newStatus = result.confidence === 'low' ? 'needs_human' : 'active'
+
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === selected.id ? { ...c, messages: finalMessages, status: newStatus as ConvoStatus, updated_at: new Date().toISOString() } : c
+          )
+        )
+
+        // Persist to Supabase
+        await supabase
+          .from('conversations')
+          .update({
+            messages: finalMessages,
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', selected.id)
+      }
+    } catch (err) {
+      console.error('Failed to send message:', err)
+    }
+
+    setSending(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-sm text-slate-500">Loading messages...</p>
+      </div>
+    )
+  }
+
+  if (conversations.length === 0) {
+    return (
+      <div className="flex flex-col">
+        <div className="shrink-0">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Messages</h1>
+          <p className="mt-1 text-sm text-slate-500">All message channels in one centralized inbox.</p>
+        </div>
+        <div className="mt-8 flex flex-col items-center justify-center rounded-2xl border border-slate-200/80 bg-white p-12 shadow-sm">
+          <p className="text-slate-500">No conversations yet.</p>
+          <p className="mt-1 text-sm text-slate-400">Messages from Instagram, Facebook, email, and your website will appear here.</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -164,19 +263,19 @@ export default function MessagesPage() {
       <div className="shrink-0">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Messages</h1>
         <p className="mt-1 text-sm text-slate-500">
-          All message channels in one centralized inbox.
+          All message channels in one centralized inbox. Type as a customer to test live AI responses.
         </p>
       </div>
 
       <div className="mt-4 flex min-h-0 flex-1 gap-0 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
-        {/* Conversation list - 300px */}
+        {/* Conversation list */}
         <div className="flex w-[300px] shrink-0 flex-col border-r border-slate-200">
           <div className="shrink-0 border-b border-slate-100 px-4 py-3">
             <h2 className="font-semibold text-slate-900">All Messages</h2>
-            <p className="text-sm text-slate-500">{MOCK_CONVERSATIONS.length} conversations</p>
+            <p className="text-sm text-slate-500">{conversations.length} conversations</p>
           </div>
           <ul className="flex-1 overflow-y-auto">
-            {MOCK_CONVERSATIONS.map((conv) => {
+            {conversations.map((conv) => {
               const isActive = conv.id === selectedId
               return (
                 <li key={conv.id}>
@@ -189,28 +288,36 @@ export default function MessagesPage() {
                   >
                     <div className="flex items-start gap-3">
                       <div
-                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium ${conv.avatarColor}`}
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium ${getAvatarColor(conv.channel)}`}
                       >
-                        {conv.initials}
+                        {getInitials(conv.customer_name)}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="truncate font-medium text-slate-900">{conv.customerName}</span>
-                          <span className="shrink-0 text-xs text-slate-400">{conv.timestamp}</span>
+                          <span className="truncate font-medium text-slate-900">{conv.customer_name}</span>
+                          <span className="shrink-0 text-xs text-slate-400">{timeAgo(conv.updated_at)}</span>
                         </div>
-                        <p className="mt-0.5 truncate text-sm text-slate-500">{conv.lastMessagePreview}</p>
+                        <p className="mt-0.5 truncate text-sm text-slate-500">{getLastMessage(conv)}</p>
                         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                           <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
                             <ChannelIcon channel={conv.channel} />
                             {CHANNEL_LABELS[conv.channel]}
                           </span>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                              conv.status === 'needs_human' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
-                            }`}
-                          >
-                            {conv.status === 'needs_human' ? 'Needs Human' : 'Resolved'}
-                          </span>
+                          {conv.status === 'needs_human' && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                              Needs Human
+                            </span>
+                          )}
+                          {conv.status === 'resolved' && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                              Resolved
+                            </span>
+                          )}
+                          {conv.status === 'spam' && (
+                            <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
+                              Spam
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -222,90 +329,115 @@ export default function MessagesPage() {
         </div>
 
         {/* Chat view */}
-        <div className="flex min-w-0 flex-1 flex-col bg-slate-50/50">
-          {/* Chat header */}
-          <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <div
-                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium ${selected.avatarColor}`}
-              >
-                {selected.initials}
-              </div>
-              <div className="min-w-0">
-                <p className="font-semibold text-slate-900">{selected.customerName}</p>
-                <p className="inline-flex items-center gap-1.5 text-sm text-slate-500">
-                  <ChannelIcon channel={selected.channel} />
-                  {CHANNEL_LABELS[selected.channel]}
-                </p>
-              </div>
-            </div>
-            {selected.status === 'needs_human' && (
-              <div className="flex shrink-0 items-center gap-2 rounded-lg bg-amber-50 px-3 py-1.5 text-sm text-amber-800">
-                <BellIcon className="h-4 w-4" />
-                <span>Manager notified via email</span>
-              </div>
-            )}
+        {!selected ? (
+          <div className="flex min-w-0 flex-1 items-center justify-center text-sm text-slate-400">
+            Select a conversation
           </div>
-
-          {/* Message list */}
-          <div className="flex-1 overflow-y-auto px-5 py-4">
-            <div className="space-y-4">
-              {messages.map((msg) =>
-                msg.sender === 'customer' ? (
-                  <div key={msg.id} className="flex justify-start">
-                    <div className="max-w-[85%]">
-                      <div className="rounded-2xl rounded-tl-md bg-white px-4 py-2.5 shadow-sm ring-1 ring-slate-200/60">
-                        <p className="text-sm text-slate-900">{msg.text}</p>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-400">{msg.time}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div key={msg.id} className="flex justify-end">
-                    <div className="max-w-[85%]">
-                      <div className="rounded-2xl rounded-tr-md bg-indigo-600 px-4 py-2.5 text-white shadow-sm">
-                        <p className="text-sm">{msg.text}</p>
-                      </div>
-                      <div className="mt-1 flex items-center justify-end gap-2">
-                        {msg.unsure && (
-                          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-                            Unsure
-                          </span>
-                        )}
-                        <p className="text-xs text-slate-400">{msg.time}</p>
-                      </div>
-                    </div>
-                  </div>
-                )
+        ) : (
+          <div className="flex min-w-0 flex-1 flex-col bg-slate-50/50">
+            {/* Chat header */}
+            <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium ${getAvatarColor(selected.channel)}`}
+                >
+                  {getInitials(selected.customer_name)}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900">{selected.customer_name}</p>
+                  <p className="inline-flex items-center gap-1.5 text-sm text-slate-500">
+                    <ChannelIcon channel={selected.channel} />
+                    {CHANNEL_LABELS[selected.channel]}
+                  </p>
+                </div>
+              </div>
+              {selected.status === 'needs_human' && (
+                <div className="flex shrink-0 items-center gap-2 rounded-lg bg-amber-50 px-3 py-1.5 text-sm text-amber-800">
+                  <BellIcon className="h-4 w-4" />
+                  <span>Manager notified via email</span>
+                </div>
               )}
             </div>
-          </div>
 
-          {/* Input */}
-          <div className="shrink-0 border-t border-slate-200 bg-white p-4">
-            <div className="flex gap-3">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-                placeholder="Type to respond directly to customer..."
-                className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              />
-              <button
-                type="button"
-                onClick={handleSend}
-                className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-500"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 2L11 13" />
-                  <path d="M22 2l-7 20-4-9-9-4 20-7z" />
-                </svg>
-                Send
-              </button>
+            {/* Message list */}
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <div className="space-y-4">
+                {messages.map((msg, i) =>
+                  msg.role === 'customer' ? (
+                    <div key={i} className="flex justify-start">
+                      <div className="max-w-[85%]">
+                        <div className="rounded-2xl rounded-tl-md bg-white px-4 py-2.5 shadow-sm ring-1 ring-slate-200/60">
+                          <p className="text-sm text-slate-900">{msg.content}</p>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400">{msg.time}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={i} className="flex justify-end">
+                      <div className="max-w-[85%]">
+                        <div className="rounded-2xl rounded-tr-md bg-indigo-600 px-4 py-2.5 text-white shadow-sm">
+                          <p className="text-sm">{msg.content}</p>
+                        </div>
+                        <div className="mt-1 flex items-center justify-end gap-2">
+                          {msg.confidence === 'low' && (
+                            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                              Unsure
+                            </span>
+                          )}
+                          {msg.confidence === 'high' && (
+                            <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                              AI
+                            </span>
+                          )}
+                          <p className="text-xs text-slate-400">{msg.time}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                )}
+                {sending && (
+                  <div className="flex justify-end">
+                    <div className="rounded-2xl rounded-tr-md bg-indigo-600 px-6 py-3.5 shadow-sm">
+                      <div className="flex gap-1.5">
+                        <div className="h-2 w-2 animate-pulse rounded-full bg-white/50" />
+                        <div className="h-2 w-2 animate-pulse rounded-full bg-white/50" style={{ animationDelay: '0.2s' }} />
+                        <div className="h-2 w-2 animate-pulse rounded-full bg-white/50" style={{ animationDelay: '0.4s' }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={endRef} />
+              </div>
+            </div>
+
+            {/* Input */}
+            <div className="shrink-0 border-t border-slate-200 bg-white p-4">
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+                  placeholder="Type as a customer to test AI..."
+                  disabled={sending}
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={sending || !inputValue.trim()}
+                  className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 2L11 13" />
+                    <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+                  </svg>
+                  {sending ? 'Sending...' : 'Send'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )

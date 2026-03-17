@@ -1,57 +1,6 @@
 import { createClient } from '@/lib/supabase-server'
 import Link from 'next/link'
-
-const STAT_CARDS = [
-  {
-    title: 'Messages today',
-    value: '24',
-    subtitle: '+8 from yesterday',
-    href: '/messages',
-    icon: 'messages',
-    iconBg: 'bg-indigo-500/10',
-    iconColor: 'text-indigo-700',
-  },
-  {
-    title: 'AI handled',
-    value: '89%',
-    subtitle: '21 of 24 automated',
-    href: '/messages',
-    icon: 'ai',
-    iconBg: 'bg-emerald-500/10',
-    iconColor: 'text-emerald-700',
-  },
-  {
-    title: 'New leads',
-    value: '6',
-    subtitle: '3 contacted, 1 converted',
-    href: '/leads',
-    icon: 'leads',
-    iconBg: 'bg-amber-500/10',
-    iconColor: 'text-amber-800',
-  },
-  {
-    title: 'Reviews sent',
-    value: '4',
-    subtitle: '2 completed (avg 4.5★)',
-    href: '/reviews',
-    icon: 'reviews',
-    iconBg: 'bg-pink-500/10',
-    iconColor: 'text-pink-700',
-  },
-] as const
-
-const MOCK_MESSAGES = [
-  { initials: 'JK', name: 'James Kim', preview: 'Thanks for the quick response about membership...', time: '2m ago', color: 'bg-indigo-500/15 text-indigo-800' },
-  { initials: 'SM', name: 'Sarah Martinez', preview: 'Can I get a trial pass for this weekend?', time: '14m ago', color: 'bg-slate-200/80 text-slate-700' },
-  { initials: 'DC', name: 'David Chen', preview: 'What are your evening class times?', time: '1h ago', color: 'bg-slate-200/80 text-slate-700' },
-]
-
-const MOCK_LEADS = [
-  { initials: 'AL', name: 'Alex Lee', interest: 'Personal training', status: 'New', statusClass: 'bg-slate-100 text-slate-700' },
-  { initials: 'MR', name: 'Maria Rodriguez', interest: 'Group classes', status: 'Contacted', statusClass: 'bg-slate-100 text-slate-600' },
-  { initials: 'TW', name: 'Taylor White', interest: 'Membership options', status: 'Follow Up', statusClass: 'bg-slate-100 text-slate-600' },
-  { initials: 'JP', name: 'Jordan Park', interest: 'Corporate package', status: 'Converted', statusClass: 'bg-slate-100 text-slate-700' },
-]
+import { redirect } from 'next/navigation'
 
 function StatCardIcon({ type, className }: { type: string; className: string }) {
   const base = 'shrink-0 ' + className
@@ -86,18 +35,129 @@ function StatCardIcon({ type, className }: { type: string; className: string }) 
   return null
 }
 
+function getInitials(name: string) {
+  return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+}
+
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
+}
+
+const STATUS_CLASSES: Record<string, string> = {
+  new: 'bg-blue-100 text-blue-800',
+  contacted: 'bg-amber-100 text-amber-800',
+  follow_up: 'bg-red-100 text-red-800',
+  converted: 'bg-emerald-100 text-emerald-800',
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  new: 'New',
+  contacted: 'Contacted',
+  follow_up: 'Follow Up',
+  converted: 'Converted',
+}
+
 export default async function DashboardPage() {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
   const { data: business } = await supabase
     .from('businesses')
-    .select('name')
-    .eq('user_id', user?.id ?? '')
+    .select('id, name')
+    .eq('user_id', user.id)
     .maybeSingle()
 
   const businessName = business?.name ?? 'Your business'
+  const businessId = business?.id
+
+  // Fetch real counts
+  let totalConvos = 0
+  let needsHumanCount = 0
+  let totalLeads = 0
+  let contactedLeads = 0
+  let convertedLeads = 0
+  let recentConversations: any[] = []
+  let recentLeads: any[] = []
+
+  if (businessId) {
+    // Conversations
+    const { data: convos } = await supabase
+      .from('conversations')
+      .select('id, customer_name, channel, status, messages, updated_at')
+      .eq('business_id', businessId)
+      .order('updated_at', { ascending: false })
+      .limit(50)
+
+    if (convos) {
+      totalConvos = convos.length
+      needsHumanCount = convos.filter((c: any) => c.status === 'needs_human').length
+      recentConversations = convos.slice(0, 3)
+    }
+
+    // Leads
+    const { data: leads } = await supabase
+      .from('leads')
+      .select('id, name, email, interest, status, created_at')
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    if (leads) {
+      totalLeads = leads.length
+      contactedLeads = leads.filter((l: any) => l.status === 'contacted').length
+      convertedLeads = leads.filter((l: any) => l.status === 'converted').length
+      recentLeads = leads.slice(0, 4)
+    }
+  }
+
+  const aiHandledPercent = totalConvos > 0 ? Math.round(((totalConvos - needsHumanCount) / totalConvos) * 100) : 0
+  const aiHandledCount = totalConvos - needsHumanCount
+
+  const STAT_CARDS = [
+    {
+      title: 'Messages',
+      value: String(totalConvos),
+      subtitle: needsHumanCount > 0 ? `${needsHumanCount} need human response` : 'All handled by AI',
+      href: '/messages',
+      icon: 'messages',
+      iconBg: 'bg-indigo-500/10',
+      iconColor: 'text-indigo-700',
+    },
+    {
+      title: 'AI handled',
+      value: `${aiHandledPercent}%`,
+      subtitle: `${aiHandledCount} of ${totalConvos} automated`,
+      href: '/messages',
+      icon: 'ai',
+      iconBg: 'bg-emerald-500/10',
+      iconColor: 'text-emerald-700',
+    },
+    {
+      title: 'New leads',
+      value: String(totalLeads),
+      subtitle: `${contactedLeads} contacted, ${convertedLeads} converted`,
+      href: '/leads',
+      icon: 'leads',
+      iconBg: 'bg-amber-500/10',
+      iconColor: 'text-amber-800',
+    },
+    {
+      title: 'Reviews sent',
+      value: '0',
+      subtitle: 'Review system coming soon',
+      href: '/reviews',
+      icon: 'reviews',
+      iconBg: 'bg-pink-500/10',
+      iconColor: 'text-pink-700',
+    },
+  ]
 
   return (
     <div className="flex flex-col">
@@ -138,20 +198,28 @@ export default async function DashboardPage() {
             <h2 className="font-semibold text-slate-900">Recent Messages</h2>
             <span className="text-sm font-medium text-slate-500">View all →</span>
           </div>
-          <ul className="divide-y divide-slate-100">
-            {MOCK_MESSAGES.map((msg) => (
-              <li key={msg.name} className="flex items-center gap-4 px-5 py-4">
-                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium ${msg.color}`}>
-                  {msg.initials}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-slate-900">{msg.name}</p>
-                  <p className="truncate text-sm text-slate-500">{msg.preview}</p>
-                </div>
-                <span className="shrink-0 text-xs text-slate-400">{msg.time}</span>
-              </li>
-            ))}
-          </ul>
+          {recentConversations.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-slate-400">No messages yet</div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {recentConversations.map((conv: any) => {
+                const msgs = conv.messages ?? []
+                const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1].content : 'No messages'
+                return (
+                  <li key={conv.id} className="flex items-center gap-4 px-5 py-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-500/15 text-sm font-medium text-indigo-800">
+                      {getInitials(conv.customer_name)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-slate-900">{conv.customer_name}</p>
+                      <p className="truncate text-sm text-slate-500">{lastMsg}</p>
+                    </div>
+                    <span className="shrink-0 text-xs text-slate-400">{timeAgo(conv.updated_at)}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
         </Link>
 
         <Link
@@ -162,22 +230,26 @@ export default async function DashboardPage() {
             <h2 className="font-semibold text-slate-900">Lead Pipeline</h2>
             <span className="text-sm font-medium text-slate-500">View all →</span>
           </div>
-          <ul className="divide-y divide-slate-100">
-            {MOCK_LEADS.map((lead) => (
-              <li key={lead.name} className="flex items-center gap-4 px-5 py-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-medium text-slate-600">
-                  {lead.initials}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-slate-900">{lead.name}</p>
-                  <p className="text-sm text-slate-500">{lead.interest}</p>
-                </div>
-                <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${lead.statusClass}`}>
-                  {lead.status}
-                </span>
-              </li>
-            ))}
-          </ul>
+          {recentLeads.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-slate-400">No leads yet</div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {recentLeads.map((lead: any) => (
+                <li key={lead.id} className="flex items-center gap-4 px-5 py-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-medium text-slate-600">
+                    {getInitials(lead.name)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-slate-900">{lead.name}</p>
+                    <p className="text-sm text-slate-500">{lead.interest}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_CLASSES[lead.status] ?? 'bg-slate-100 text-slate-700'}`}>
+                    {STATUS_LABELS[lead.status] ?? lead.status}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Link>
       </div>
     </div>
