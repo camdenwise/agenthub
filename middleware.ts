@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-const PUBLIC_PATHS = ['/login', '/signup']
+const PUBLIC_PATHS = ['/login', '/signup', '/api/']
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
@@ -27,7 +27,6 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Refresh session if expired (required for SSR)
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -35,7 +34,7 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
   const isPublicPath = PUBLIC_PATHS.some((path) => pathname.startsWith(path))
 
-  if (user && isPublicPath) {
+  if (user && isPublicPath && !pathname.startsWith('/api/')) {
     return NextResponse.redirect(new URL('/', request.url))
   }
 
@@ -48,12 +47,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico, other static assets
-     */
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }
