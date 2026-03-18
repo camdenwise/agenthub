@@ -19,6 +19,7 @@ export default function SignupPage() {
     setError(null)
     setLoading(true)
 
+    // Step 1: Create the auth account
     const { data: authData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
@@ -30,19 +31,35 @@ export default function SignupPage() {
       return
     }
 
-    if (authData.user) {
-      const { error: insertError } = await supabase.from('businesses').insert({
-        user_id: authData.user.id,
-        name: businessName.trim() || null,
+    if (!authData.user) {
+      setLoading(false)
+      setError('Something went wrong. Please try again.')
+      return
+    }
+
+    // Step 2: Create the business record via API route (bypasses RLS)
+    try {
+      const res = await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: authData.user.id,
+          email: authData.user.email,
+          businessName: businessName.trim(),
+        }),
       })
 
-      if (insertError) {
-        setError(
-          'Account created but failed to save business: ' + insertError.message
-        )
+      const result = await res.json()
+
+      if (!res.ok) {
+        setError('Account created but business setup failed: ' + (result.error || 'Unknown error'))
         setLoading(false)
         return
       }
+    } catch (err) {
+      setError('Account created but business setup failed. Please contact support.')
+      setLoading(false)
+      return
     }
 
     setLoading(false)
