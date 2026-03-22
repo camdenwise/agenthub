@@ -1,11 +1,13 @@
 // POST /api/messages/[businessId]
-// Incoming customer messages from Zapier / integrations. Creates or updates conversations,
+// Incoming customer messages from Zapier webhooks. Creates or updates conversations,
 // runs Claude when configured, notifies manager on low confidence.
+// Uses the same Supabase URL + keys as lib/supabase.ts; server routes should set
+// SUPABASE_SERVICE_ROLE_KEY in .env for inserts that bypass RLS (falls back to anon key).
 
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
-import { notifyManager } from '@/lib/notify-manager'
+import { Resend } from 'resend'
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -41,9 +43,8 @@ function getString(
   return undefined
 }
 
-async function parseIncomingBody(
-  req: NextRequest
-): Promise<Record<string, string>> {
+/** Normalize JSON or flat form fields into a single string map. */
+async function parseIncomingBody(req: NextRequest): Promise<Record<string, string>> {
   const contentType = req.headers.get('content-type') ?? ''
 
   if (contentType.includes('application/json')) {
@@ -73,6 +74,7 @@ async function parseIncomingBody(
     return out
   }
 
+  // Fallback: try JSON
   try {
     const text = await req.text()
     if (!text.trim()) return {}
@@ -129,14 +131,6 @@ function buildMessageText(raw: Record<string, string>): string | undefined {
   ])
 }
 
-function formatTime(): string {
-  return new Date().toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  })
-}
-
 function parseAiResponse(raw: string): { content: string; confidence: 'high' | 'low' } {
   const trimmed = raw.trim()
   const unsure = /^\[UNSURE\]/i.test(trimmed)
@@ -164,14 +158,25 @@ export async function POST(req: NextRequest, context: RouteContext) {
   const raw = await parseIncomingBody(req)
   const customerName = buildCustomerName(raw)
   const messageText = buildMessageText(raw)
-  const channelRaw = getString(raw, ['channel', 'Channel', 'source_channel', 'platform'])
+  const channelRaw = getString(raw, [
+    'channel',
+    'Channel',
+    'platform',
+    'Platform',
+    'source',
+    'Source',
+    'source_channel',
+  ])
   const externalThreadId =
     getString(raw, [
       'externalThreadId',
       'external_thread_id',
-      'thread_id',
       'threadId',
+      'thread_id',
+      'conversationId',
       'conversation_id',
+      'sender_id',
+      'senderId',
     ]) ?? null
 
   if (!customerName || !messageText) {
@@ -189,7 +194,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
   if (!channelRaw) {
     return withCors(
       NextResponse.json(
-        { error: 'Missing required field: channel' },
+        { error: 'Missing required field: channel (or platform/source)' },
         { status: 400 }
       )
     )
@@ -212,7 +217,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
   const { data: business, error: bizError } = await supabase
     .from('businesses')
-    .select('id, name, manager_name, manager_email')
+    .select('id, name, manager_email, manager_name')
     .eq('id', businessId)
     .maybeSingle()
 
@@ -221,14 +226,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
   }
 
   const now = new Date().toISOString()
-  const timeStr = formatTime()
   const customerMsg = {
     role: 'customer' as const,
     content: messageText,
-    time: timeStr,
+    time: now,
   }
 
-  // Find existing conversation
   let conversation: {
     id: string
     messages: Array<{
@@ -301,16 +304,15 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
   const conversationId = conversation.id
 
-  const { data: instructionRow } = await supabase
+  const { data: instructionDoc } = await supabase
     .from('instruction_docs')
-    .select('content')
+    .select('id, content')
     .eq('business_id', businessId)
     .eq('is_active', true)
     .order('version', { ascending: false })
     .limit(1)
     .maybeSingle()
 
-  const instructionDoc = instructionRow?.content?.trim() ?? ''
   const anthropicKey = process.env.ANTHROPIC_API_KEY
 
   const logAgent = async (row: {
@@ -330,30 +332,52 @@ export async function POST(req: NextRequest, context: RouteContext) {
     })
   }
 
-  if (!anthropicKey || !instructionDoc) {
+  const respond = (
+    body: Record<string, unknown>,
+    status = 200
+  ) => withCors(NextResponse.json(body, { status }))
+
+  if (!instructionDoc?.content?.trim()) {
     await logAgent({
-      agent_type: 'zapier_dm',
+      agent_type: 'dm_responder',
       input_message: messageText,
-      output_message: !anthropicKey
-        ? 'Skipped AI: ANTHROPIC_API_KEY not set'
-        : 'Skipped AI: no active instruction document',
-      confidence: 'n/a',
+      output_message:
+        'Warning: No active instruction document — AI response skipped.',
+      confidence: 'error',
       channel,
     })
 
-    return withCors(
-      NextResponse.json({
-        success: true,
-        conversationId,
-        response: null,
-        confidence: null,
-        skipped: !anthropicKey ? 'anthropic' : 'instruction_doc',
-      })
-    )
+    return respond({
+      success: true,
+      conversationId,
+      aiResponse: '',
+      confidence: null,
+      needsHuman: false,
+      warning: 'No active instruction document; message saved without AI response.',
+    })
+  }
+
+  if (!anthropicKey) {
+    await logAgent({
+      agent_type: 'dm_responder',
+      input_message: messageText,
+      output_message: 'Error: ANTHROPIC_API_KEY is not configured.',
+      confidence: 'error',
+      channel,
+    })
+    return respond({
+      success: true,
+      conversationId,
+      aiResponse: '',
+      confidence: null,
+      needsHuman: false,
+      warning: 'AI not configured; message saved.',
+    })
   }
 
   const priorMessages = conversation.messages.slice(0, -1)
-  const historyForApi = priorMessages.map((m) => ({
+  const historySlice = priorMessages.slice(-10)
+  const historyForApi = historySlice.map((m) => ({
     role: (m.role === 'customer' ? 'user' : 'assistant') as 'user' | 'assistant',
     content: m.content,
   }))
@@ -366,20 +390,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
     { role: 'user' as const, content: messageText },
   ]
 
-  const systemPrompt = `You are responding to a customer's social media DM, website chat, or similar message on behalf of a local business.
-
-Style:
-- Be conversational, warm, and concise — aim for 2-4 sentences.
-- Write as a friendly staff member, not as an AI.
-
-Rules:
-- ONLY use information from the INSTRUCTION DOCUMENT below to answer. Do not invent facts, prices, hours, or policies that are not stated there.
-- If you cannot fully answer from the instruction document alone, start your ENTIRE reply with exactly the characters [UNSURE] (including the brackets), then add a brief, friendly sentence offering to have someone follow up.
-- Do not mention that you are an AI or that you read an internal document.
+  const instructionContent = instructionDoc.content.trim()
+  const systemPrompt = `You are responding to a social media DM for a local business. Be conversational, warm, and concise (2-4 sentences). You ONLY answer based on the instruction document provided. If a question cannot be answered from this document, respond with exactly: [UNSURE] followed by a brief explanation.
 
 INSTRUCTION DOCUMENT:
 ---
-${instructionDoc}
+${instructionContent}
 ---`
 
   let rawAssistantText: string
@@ -399,29 +415,29 @@ ${instructionDoc}
     const emsg = err instanceof Error ? err.message : String(err)
     console.error('Anthropic error (messages route):', err)
     await logAgent({
-      agent_type: 'zapier_dm',
+      agent_type: 'dm_responder',
       input_message: messageText,
       output_message: `AI error: ${emsg}`,
       confidence: 'error',
       channel,
     })
-    return withCors(
-      NextResponse.json({
-        success: true,
-        conversationId,
-        response: null,
-        confidence: null,
-        error: 'AI request failed',
-      })
-    )
+    return respond({
+      success: true,
+      conversationId,
+      aiResponse: '',
+      confidence: null,
+      needsHuman: false,
+      warning: 'AI request failed; customer message saved.',
+    })
   }
 
   const { content: replyBody, confidence } = parseAiResponse(rawAssistantText)
+  const agentTime = new Date().toISOString()
 
   const agentMsg = {
     role: 'agent' as const,
     content: replyBody,
-    time: formatTime(),
+    time: agentTime,
     confidence,
   }
 
@@ -433,44 +449,54 @@ ${instructionDoc}
     .update({
       messages: finalMessages,
       status: newStatus,
-      updated_at: new Date().toISOString(),
+      updated_at: agentTime,
     })
     .eq('id', conversationId)
 
-  let logOutput = rawAssistantText
-  if (confidence === 'low') {
-    if (process.env.RESEND_API_KEY && business.manager_email) {
-      await notifyManager({
-        managerEmail: business.manager_email,
-        managerName: business.manager_name || 'Manager',
-        businessName: business.name || 'Your business',
-        customerName: customerName.trim(),
-        channel,
-        lastMessage: messageText,
-        conversationId,
-      })
-      logOutput += '\n[notify: manager emailed]'
+  let notifyNote = ''
+  if (confidence === 'low' && business.manager_email && process.env.RESEND_API_KEY) {
+    const domain = process.env.RESEND_DOMAIN || 'agenthub.io'
+    const resend = new Resend(process.env.RESEND_API_KEY)
+    const channelLabel =
+      channel === 'web_chat'
+        ? 'web chat'
+        : channel.charAt(0).toUpperCase() + channel.slice(1)
+    const plain = `${customerName.trim()} sent a message on ${channelLabel} that the AI couldn't confidently answer. Their message: ${messageText}. Please log into AgentHub to respond.`
+    const { error: sendErr } = await resend.emails.send({
+      from: `AgentHub <notifications@${domain}>`,
+      to: business.manager_email,
+      subject: `[Action needed] ${customerName.trim()} — ${business.name || 'AgentHub'}`,
+      html: `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 560px; margin: 0 auto; padding: 24px;"><p style="font-size: 15px; color: #374151; line-height: 1.6;">${plain
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')}</p></div>`,
+    })
+    if (sendErr) {
+      console.error('Resend notify error:', sendErr)
+      notifyNote = `\n[notify failed: ${sendErr.message}]`
     } else {
-      logOutput += !process.env.RESEND_API_KEY
-        ? '\n[notify: skipped — RESEND_API_KEY not set]'
-        : '\n[notify: skipped — manager_email not set]'
+      notifyNote = '\n[notify: manager emailed]'
     }
+  } else if (confidence === 'low') {
+    notifyNote = !process.env.RESEND_API_KEY
+      ? '\n[notify: skipped — RESEND_API_KEY not set]'
+      : '\n[notify: skipped — manager_email not set]'
   }
 
   await logAgent({
-    agent_type: 'zapier_dm',
+    agent_type: 'dm_responder',
     input_message: messageText,
-    output_message: logOutput,
+    output_message: rawAssistantText + notifyNote,
     confidence,
     channel,
   })
 
-  return withCors(
-    NextResponse.json({
-      success: true,
-      conversationId,
-      response: replyBody,
-      confidence,
-    })
-  )
+  return respond({
+    success: true,
+    conversationId,
+    aiResponse: replyBody,
+    confidence,
+    needsHuman: confidence === 'low',
+    ...(notifyNote.includes('failed') ? { warning: 'Manager notification email failed to send.' } : {}),
+  })
 }
