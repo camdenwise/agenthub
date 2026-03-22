@@ -19,7 +19,9 @@ export type Lead = {
   follow_up_email: {
     subject: string
     body: string
-    sent_at: string
+    /** ISO timestamp when the follow-up was sent */
+    sent_at?: string
+    sentAt?: string
   } | null
   created_at: string
   updated_at: string

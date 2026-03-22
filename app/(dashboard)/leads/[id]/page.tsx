@@ -168,12 +168,12 @@ export default function LeadDetailPage() {
         <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-900">AI Follow-Up Email</h2>
-            {lead.follow_up_email?.sent_at && (
+            {(lead.follow_up_email?.sent_at || lead.follow_up_email?.sentAt) && (
               <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
                 <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                Sent {new Date(lead.follow_up_email.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                Sent {new Date(lead.follow_up_email.sent_at || lead.follow_up_email.sentAt || '').toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </span>
             )}
           </div>
