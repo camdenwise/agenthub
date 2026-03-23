@@ -15,6 +15,7 @@ type DBConversation = {
   messages: { role: string; content: string; time: string; confidence?: string }[]
   created_at: string
   updated_at: string
+  external_thread_id?: string | null
 }
 
 type ChatMessage = {
@@ -22,6 +23,18 @@ type ChatMessage = {
   content: string
   time: string
   confidence?: string
+}
+
+function formatMessageTime(time: string) {
+  const d = new Date(time)
+  if (!Number.isNaN(d.getTime())) {
+    return d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    })
+  }
+  return time
 }
 
 const CHANNEL_LABELS: Record<Channel, string> = {
@@ -103,9 +116,11 @@ export default function MessagesPage() {
     async function load() {
       setLoading(true)
 
-      // Get current user's business
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      if (!user) {
+        setLoading(false)
+        return
+      }
 
       const { data: business } = await supabase
         .from('businesses')
@@ -156,80 +171,95 @@ export default function MessagesPage() {
   async function handleSend() {
     if (!inputValue.trim() || sending || !selected || !businessId) return
 
-    const msg = inputValue.trim()
+    const text = inputValue.trim()
     setInputValue('')
     setSending(true)
 
-    // Optimistically add the customer message
-    const customerMsg: ChatMessage = {
-      role: 'customer',
-      content: msg,
-      time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+    const now = new Date().toISOString()
+    const agentMsg: ChatMessage = {
+      role: 'agent',
+      content: text,
+      time: now,
+      confidence: 'human',
     }
 
-    const updatedMessages = [...messages, customerMsg]
+    const updatedMessages = [...messages, agentMsg]
+    const newStatus: ConvoStatus =
+      selected.status === 'needs_human' ? 'active' : selected.status
 
     setConversations((prev) =>
       prev.map((c) =>
-        c.id === selected.id ? { ...c, messages: updatedMessages, updated_at: new Date().toISOString() } : c
+        c.id === selected.id
+          ? {
+              ...c,
+              messages: updatedMessages,
+              status: newStatus,
+              updated_at: now,
+            }
+          : c
       )
     )
 
     try {
-      // Call the AI engine API
-      const res = await fetch('/api/ai/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mode: 'dm',
-          businessId,
-          conversationId: selected.id,
-          conversationHistory: messages,
-          newMessage: msg,
-          channel: selected.channel,
-          customerName: selected.customer_name,
-        }),
-      })
+      const { data: updatedRow, error: updateErr } = await supabase
+        .from('conversations')
+        .update({
+          messages: updatedMessages,
+          status: newStatus,
+          updated_at: now,
+        })
+        .eq('id', selected.id)
+        .select()
+        .single()
 
-      const result = await res.json()
-
-      if (result.isSpam) {
-        // Mark as spam in the local state
+      if (updateErr) {
+        console.error('Failed to save reply:', updateErr)
         setConversations((prev) =>
           prev.map((c) =>
-            c.id === selected.id ? { ...c, status: 'spam' as ConvoStatus } : c
+            c.id === selected.id
+              ? { ...c, messages, status: selected.status, updated_at: selected.updated_at }
+              : c
           )
         )
-      } else {
-        // Add the AI response
-        const aiMsg: ChatMessage = {
-          role: 'agent',
-          content: result.content,
-          time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
-          confidence: result.confidence,
-        }
+        alert('Could not save your reply. Please try again.')
+        setSending(false)
+        return
+      }
 
-        const finalMessages = [...updatedMessages, aiMsg]
-        const newStatus = result.confidence === 'low' ? 'needs_human' : 'active'
-
+      if (updatedRow) {
         setConversations((prev) =>
-          prev.map((c) =>
-            c.id === selected.id ? { ...c, messages: finalMessages, status: newStatus as ConvoStatus, updated_at: new Date().toISOString() } : c
-          )
+          prev.map((c) => (c.id === selected.id ? (updatedRow as DBConversation) : c))
         )
+      }
 
-        // Persist to Supabase
-        await supabase
-          .from('conversations')
-          .update({
-            messages: finalMessages,
-            status: newStatus,
-            updated_at: new Date().toISOString(),
+      const webhookUrl = process.env.NEXT_PUBLIC_ZAPIER_REPLY_WEBHOOK
+      if (webhookUrl) {
+        try {
+          await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: text,
+              conversationId: selected.id,
+              customerName: selected.customer_name,
+              channel: selected.channel,
+              externalThreadId: selected.external_thread_id ?? '',
+            }),
           })
-          .eq('id', selected.id)
+        } catch (zapErr) {
+          console.error('Zapier webhook error:', zapErr)
+        }
       }
     } catch (err) {
       console.error('Failed to send message:', err)
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === selected.id
+            ? { ...c, messages, status: selected.status, updated_at: selected.updated_at }
+            : c
+        )
+      )
+      alert('Something went wrong. Please try again.')
     }
 
     setSending(false)
@@ -263,7 +293,7 @@ export default function MessagesPage() {
       <div className="shrink-0">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Messages</h1>
         <p className="mt-1 text-sm text-slate-500">
-          All message channels in one centralized inbox. Type as a customer to test live AI responses.
+          Reply as your business; replies are saved here and can be forwarded to the customer via Zapier.
         </p>
       </div>
 
@@ -369,7 +399,7 @@ export default function MessagesPage() {
                         <div className="rounded-2xl rounded-tl-md bg-white px-4 py-2.5 shadow-sm ring-1 ring-slate-200/60">
                           <p className="text-sm text-slate-900">{msg.content}</p>
                         </div>
-                        <p className="mt-1 text-xs text-slate-400">{msg.time}</p>
+                        <p className="mt-1 text-xs text-slate-400">{formatMessageTime(msg.time)}</p>
                       </div>
                     </div>
                   ) : (
@@ -384,12 +414,17 @@ export default function MessagesPage() {
                               Unsure
                             </span>
                           )}
+                          {msg.confidence === 'human' && (
+                            <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                              Human
+                            </span>
+                          )}
                           {msg.confidence === 'high' && (
                             <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
                               AI
                             </span>
                           )}
-                          <p className="text-xs text-slate-400">{msg.time}</p>
+                          <p className="text-xs text-slate-400">{formatMessageTime(msg.time)}</p>
                         </div>
                       </div>
                     </div>
@@ -418,7 +453,7 @@ export default function MessagesPage() {
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-                  placeholder="Type as a customer to test AI..."
+                  placeholder="Type a reply..."
                   disabled={sending}
                   className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
                 />
