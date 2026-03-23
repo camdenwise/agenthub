@@ -4,13 +4,6 @@ import { createClient } from '@/lib/supabase'
 import { useAdmin } from '@/lib/admin-context'
 import { useEffect, useState } from 'react'
 
-const MOCK_REQUESTS = [
-  { id: '1', name: 'Taylor Wright', initials: 'TW', avatarColor: 'bg-indigo-500/15 text-indigo-800', milestone: '10th visit - 10 total visits', status: 'sent', rating: null, date: 'Today' },
-  { id: '2', name: 'Jordan Blake', initials: 'JB', avatarColor: 'bg-violet-500/15 text-violet-800', milestone: '5th visit - 5 total visits', status: 'completed', rating: 5, date: 'Mar 4' },
-  { id: '3', name: 'Casey Morgan', initials: 'CM', avatarColor: 'bg-slate-200/80 text-slate-700', milestone: 'Trial → Member - 5 total visits', status: 'sent', rating: null, date: 'Mar 3' },
-  { id: '4', name: 'Riley Nguyen', initials: 'RN', avatarColor: 'bg-slate-200/80 text-slate-700', milestone: '10th visit - 12 total visits', status: 'completed', rating: 4, date: 'Mar 1' },
-]
-
 const DEFAULT_MILESTONES = [
   { key: 'visit_5', label: '5th Visit', on: true },
   { key: 'visit_10', label: '10th Visit', on: true },
@@ -29,7 +22,6 @@ export default function ReviewsPage() {
 
   const supabase = createClient()
 
-  // Load saved trigger settings from business.settings
   useEffect(() => {
     async function load() {
       if (!activeBusiness) return
@@ -53,12 +45,10 @@ export default function ReviewsPage() {
     if (!adminLoading) load()
   }, [activeBusiness?.id, adminLoading])
 
-  // Save trigger settings to Supabase
   async function saveTriggers(updated: typeof milestones) {
     if (!activeBusiness) return
     setSaving(true)
 
-    // Get existing settings first so we don't overwrite other fields
     const { data: business } = await supabase
       .from('businesses')
       .select('settings')
@@ -78,9 +68,7 @@ export default function ReviewsPage() {
   }
 
   function toggleMilestone(key: string) {
-    const updated = milestones.map((m) =>
-      m.key === key ? { ...m, on: !m.on } : m
-    )
+    const updated = milestones.map((m) => m.key === key ? { ...m, on: !m.on } : m)
     setMilestones(updated)
     saveTriggers(updated)
   }
@@ -126,7 +114,7 @@ export default function ReviewsPage() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-slate-500">Reviews Sent</p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">12</p>
+            <p className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">0</p>
             <p className="mt-1 text-xs text-slate-500">This month</p>
           </div>
         </div>
@@ -138,8 +126,8 @@ export default function ReviewsPage() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-slate-500">Completed</p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">7</p>
-            <p className="mt-1 text-xs text-slate-500">58% completion rate</p>
+            <p className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">0</p>
+            <p className="mt-1 text-xs text-slate-500">No reviews yet</p>
           </div>
         </div>
         <div className="flex items-start gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
@@ -150,8 +138,8 @@ export default function ReviewsPage() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-slate-500">Avg Rating</p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">4.6</p>
-            <p className="mt-1 text-xs text-slate-500">From completed reviews</p>
+            <p className="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">--</p>
+            <p className="mt-1 text-xs text-slate-500">No ratings yet</p>
           </div>
         </div>
       </div>
@@ -162,30 +150,13 @@ export default function ReviewsPage() {
           <div className="border-b border-slate-100 px-5 py-4">
             <h2 className="font-semibold text-slate-900">Recent Requests</h2>
           </div>
-          <ul className="divide-y divide-slate-100">
-            {MOCK_REQUESTS.map((req) => (
-              <li key={req.id} className="flex items-center gap-4 px-5 py-4">
-                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-medium ${req.avatarColor}`}>
-                  {req.initials}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-slate-900">{req.name}</p>
-                  <p className="text-sm text-slate-500">{req.milestone}</p>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-0.5">
-                  {req.status === 'sent' ? (
-                    <span className="text-sm font-medium text-amber-700">Sent</span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-700">
-                      <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                      {req.rating}★
-                    </span>
-                  )}
-                  <span className="text-xs text-slate-400">{req.date}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="px-5 py-12 text-center">
+            <svg className="mx-auto h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z" />
+            </svg>
+            <p className="mt-3 text-sm text-slate-500">No review requests sent yet.</p>
+            <p className="mt-1 text-xs text-slate-400">Requests will appear here once connected to your booking platform.</p>
+          </div>
         </section>
 
         <section className="w-full rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm lg:w-[320px] lg:shrink-0">
