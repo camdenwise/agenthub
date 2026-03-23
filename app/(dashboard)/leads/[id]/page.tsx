@@ -6,6 +6,7 @@ import {
 } from '@/lib/leads-data'
 import type { Lead } from '@/lib/leads-data'
 import { createClient } from '@/lib/supabase'
+import { useAdmin } from '@/lib/admin-context'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
@@ -22,27 +23,16 @@ const FIELD_LABELS: Record<string, string> = {
 export default function LeadDetailPage() {
   const params = useParams()
   const id = params.id as string
+  const { activeBusiness, loading: adminLoading } = useAdmin()
   const [lead, setLead] = useState<Lead | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
-  const [businessId, setBusinessId] = useState<string | null>(null)
 
   const supabase = createClient()
 
   useEffect(() => {
     async function load() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: business } = await supabase
-        .from('businesses')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle()
-
-      if (business) {
-        setBusinessId(business.id)
-      }
+      if (!activeBusiness) return
 
       const { data } = await supabase
         .from('leads')
@@ -54,11 +44,11 @@ export default function LeadDetailPage() {
       setLoading(false)
     }
 
-    load()
-  }, [id])
+    if (!adminLoading) load()
+  }, [id, activeBusiness?.id, adminLoading])
 
   async function handleGenerateFollowUp() {
-    if (!lead || !businessId) return
+    if (!lead || !activeBusiness) return
     setGenerating(true)
 
     try {
@@ -67,7 +57,7 @@ export default function LeadDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode: 'lead',
-          businessId,
+          businessId: activeBusiness.id,
           leadId: lead.id,
           leadName: lead.name,
           leadEmail: lead.email,
@@ -80,7 +70,6 @@ export default function LeadDetailPage() {
       const result = await res.json()
 
       if (result.confidence === 'high') {
-        // Refresh the lead data from Supabase
         const { data: updated } = await supabase
           .from('leads')
           .select('*')
@@ -96,7 +85,7 @@ export default function LeadDetailPage() {
     setGenerating(false)
   }
 
-  if (loading) {
+  if (adminLoading || loading) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-slate-500">Loading lead...</p>
@@ -132,7 +121,6 @@ export default function LeadDetailPage() {
       </Link>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        {/* Form submission (left) */}
         <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-900">Form Submission</h2>
@@ -164,16 +152,15 @@ export default function LeadDetailPage() {
           </div>
         </section>
 
-        {/* AI follow-up email (right) */}
         <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-900">AI Follow-Up Email</h2>
-            {(lead.follow_up_email?.sent_at || lead.follow_up_email?.sentAt) && (
+            {lead.follow_up_email?.sent_at && (
               <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
                 <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                Sent {new Date(lead.follow_up_email.sent_at || lead.follow_up_email.sentAt || '').toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                Sent {new Date(lead.follow_up_email.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </span>
             )}
           </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { createClient } from '@/lib/supabase'
+import { useAdmin } from '@/lib/admin-context'
 import { useEffect, useRef, useState } from 'react'
 
 const TIPS = [
@@ -26,6 +27,7 @@ type UploadedFile = {
 }
 
 export default function InstructionFilesPage() {
+  const { activeBusiness, loading: adminLoading } = useAdmin()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [editorContent, setEditorContent] = useState('')
   const [files, setFiles] = useState<UploadedFile[]>([])
@@ -33,34 +35,22 @@ export default function InstructionFilesPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [businessId, setBusinessId] = useState<string | null>(null)
   const [docId, setDocId] = useState<string | null>(null)
 
   const supabase = createClient()
 
-  // Load instruction doc from Supabase on mount
+  // Load instruction doc when activeBusiness changes
   useEffect(() => {
     async function load() {
+      if (!activeBusiness) return
       setLoading(true)
+      setEditorContent('')
+      setDocId(null)
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoading(false); return }
-
-      const { data: business } = await supabase
-        .from('businesses')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle()
-
-      if (!business) { setLoading(false); return }
-
-      setBusinessId(business.id)
-
-      // Get the active instruction doc
       const { data: doc } = await supabase
         .from('instruction_docs')
         .select('id, content')
-        .eq('business_id', business.id)
+        .eq('business_id', activeBusiness.id)
         .eq('is_active', true)
         .order('version', { ascending: false })
         .limit(1)
@@ -74,26 +64,23 @@ export default function InstructionFilesPage() {
       setLoading(false)
     }
 
-    load()
-  }, [])
+    if (!adminLoading) load()
+  }, [activeBusiness?.id, adminLoading])
 
-  // Save to Supabase
   async function handleSave() {
-    if (!businessId) return
+    if (!activeBusiness) return
     setSaving(true)
 
     if (docId) {
-      // Update existing doc
       await supabase
         .from('instruction_docs')
         .update({ content: editorContent })
         .eq('id', docId)
     } else {
-      // Create new doc
       const { data: newDoc } = await supabase
         .from('instruction_docs')
         .insert({
-          business_id: businessId,
+          business_id: activeBusiness.id,
           content: editorContent,
           version: 1,
           is_active: true,
@@ -109,23 +96,19 @@ export default function InstructionFilesPage() {
     setTimeout(() => setSaved(false), 3000)
   }
 
-  // Auto-save after 2 seconds of no typing
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   function handleEditorChange(value: string) {
     setEditorContent(value)
     setSaved(false)
 
-    // Clear previous timer
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
 
-    // Set new auto-save timer
     saveTimerRef.current = setTimeout(() => {
-      if (businessId) handleSave()
+      if (activeBusiness) handleSave()
     }, 2000)
   }
 
-  // File upload handling
   function handleFileSelect(fileList: FileList | null) {
     if (!fileList?.length) return
     const date = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -147,15 +130,13 @@ export default function InstructionFilesPage() {
 
     Promise.all(Array.from(fileList).map(readFile)).then((newFiles) => {
       setFiles((prev) => [...prev, ...newFiles])
-      // If a text file was uploaded, append its content to the editor
       const firstWithContent = newFiles.find((f) => f.content != null)
       if (firstWithContent?.content != null) {
         const newContent = editorContent
           ? editorContent + '\n\n' + firstWithContent.content
           : firstWithContent.content
         setEditorContent(newContent)
-        // Trigger save
-        if (businessId) {
+        if (activeBusiness) {
           setTimeout(() => handleSave(), 500)
         }
       }
@@ -172,7 +153,7 @@ export default function InstructionFilesPage() {
     setFiles((prev) => prev.filter((f) => f.id !== id))
   }
 
-  if (loading) {
+  if (adminLoading || loading) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-slate-500">Loading instruction files...</p>
@@ -190,27 +171,15 @@ export default function InstructionFilesPage() {
           </p>
         </div>
 
-        {/* Upload zone */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={ACCEPT}
-          multiple
-          className="hidden"
-          onChange={(e) => { handleFileSelect(e.target.files); e.target.value = '' }}
-        />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
+        <input ref={fileInputRef} type="file" accept={ACCEPT} multiple className="hidden"
+          onChange={(e) => { handleFileSelect(e.target.files); e.target.value = '' }} />
+        <button type="button" onClick={() => fileInputRef.current?.click()}
           onDrop={handleDrop}
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
           onDragLeave={() => setIsDragging(false)}
           className={`mt-6 flex w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-12 transition-colors ${
-            isDragging
-              ? 'border-indigo-400 bg-indigo-500/5'
-              : 'border-slate-200 bg-slate-50/80 hover:border-slate-300 hover:bg-slate-100/80'
-          }`}
-        >
+            isDragging ? 'border-indigo-400 bg-indigo-500/5' : 'border-slate-200 bg-slate-50/80 hover:border-slate-300 hover:bg-slate-100/80'
+          }`}>
           <svg className="h-12 w-12 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
           </svg>
@@ -218,7 +187,6 @@ export default function InstructionFilesPage() {
           <p className="mt-1 text-xs text-slate-500">PDF, DOC, TXT, or any text-based file.</p>
         </button>
 
-        {/* File list */}
         {files.length > 0 && (
           <div className="mt-6 rounded-2xl border border-slate-200/80 bg-white shadow-sm">
             <div className="border-b border-slate-100 px-5 py-3">
@@ -231,11 +199,8 @@ export default function InstructionFilesPage() {
                     <span className="block truncate font-medium text-slate-900">{file.name}</span>
                     <span className="text-xs text-slate-500">{file.size} · {file.date}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => removeFile(file.id)}
-                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                  >
+                  <button type="button" onClick={() => removeFile(file.id)}
+                    className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
@@ -246,14 +211,11 @@ export default function InstructionFilesPage() {
           </div>
         )}
 
-        {/* Direct Editor */}
         <div className="mt-6 rounded-2xl border border-slate-200/80 bg-white shadow-sm">
           <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
             <h2 className="font-semibold text-slate-900">Direct Editor</h2>
             <div className="flex items-center gap-3">
-              {saving && (
-                <span className="text-xs text-slate-400">Saving...</span>
-              )}
+              {saving && <span className="text-xs text-slate-400">Saving...</span>}
               {saved && !saving && (
                 <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -265,30 +227,21 @@ export default function InstructionFilesPage() {
               {editorContent.trim().length > 0 && !saving && !saved && (
                 <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Live</span>
               )}
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-              >
+              <button type="button" onClick={handleSave} disabled={saving}
+                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
                 {saving ? 'Saving...' : 'Save Now'}
               </button>
             </div>
           </div>
           <div className="p-4">
-            <textarea
-              value={editorContent}
-              onChange={(e) => handleEditorChange(e.target.value)}
+            <textarea value={editorContent} onChange={(e) => handleEditorChange(e.target.value)}
               placeholder="Paste or type instruction content here. Your AI agents use this to answer questions."
               className="min-h-[320px] max-h-[60vh] w-full resize-y overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              spellCheck={false}
-              rows={16}
-            />
+              spellCheck={false} rows={16} />
           </div>
         </div>
       </div>
 
-      {/* Tips panel */}
       <aside className="mt-6 w-full shrink-0 space-y-4 lg:mt-8 lg:w-[300px]">
         <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
           <h3 className="font-semibold text-slate-900">What to Include</h3>
