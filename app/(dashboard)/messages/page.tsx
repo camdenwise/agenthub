@@ -15,7 +15,6 @@ type DBConversation = {
   messages: { role: string; content: string; time: string; confidence?: string }[]
   created_at: string
   updated_at: string
-  external_thread_id?: string | null
 }
 
 type ChatMessage = {
@@ -23,18 +22,6 @@ type ChatMessage = {
   content: string
   time: string
   confidence?: string
-}
-
-function formatMessageTime(time: string) {
-  const d = new Date(time)
-  if (!Number.isNaN(d.getTime())) {
-    return d.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    })
-  }
-  return time
 }
 
 const CHANNEL_LABELS: Record<Channel, string> = {
@@ -111,16 +98,15 @@ export default function MessagesPage() {
 
   const supabase = createClient()
 
-  // Load conversations on mount
+  // Load conversations on mount and subscribe to realtime updates
   useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
     async function load() {
       setLoading(true)
 
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        setLoading(false)
-        return
-      }
+      if (!user) return
 
       const { data: business } = await supabase
         .from('businesses')
@@ -135,7 +121,6 @@ export default function MessagesPage() {
 
       setBusinessId(business.id)
 
-      // Fetch conversations
       const { data: convos } = await supabase
         .from('conversations')
         .select('*')
@@ -148,9 +133,38 @@ export default function MessagesPage() {
       }
 
       setLoading(false)
+
+      // Subscribe to realtime changes
+      channel = supabase
+        .channel('conversations-realtime')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'conversations',
+            filter: `business_id=eq.${business.id}`,
+          },
+          (payload) => {
+            if (payload.eventType === 'INSERT') {
+              setConversations((prev) => [payload.new as DBConversation, ...prev])
+            } else if (payload.eventType === 'UPDATE') {
+              setConversations((prev) =>
+                prev.map((c) => (c.id === (payload.new as DBConversation).id ? (payload.new as DBConversation) : c))
+              )
+            } else if (payload.eventType === 'DELETE') {
+              setConversations((prev) => prev.filter((c) => c.id !== (payload.old as any).id))
+            }
+          }
+        )
+        .subscribe()
     }
 
     load()
+
+    return () => {
+      if (channel) supabase.removeChannel(channel)
+    }
   }, [])
 
   // Scroll to bottom when messages change
@@ -161,7 +175,6 @@ export default function MessagesPage() {
   const selected = conversations.find((c) => c.id === selectedId)
   const messages: ChatMessage[] = selected?.messages ?? []
 
-  // Get the last message text for the conversation list preview
   function getLastMessage(convo: DBConversation) {
     const msgs = convo.messages ?? []
     if (msgs.length === 0) return 'No messages'
@@ -171,95 +184,75 @@ export default function MessagesPage() {
   async function handleSend() {
     if (!inputValue.trim() || sending || !selected || !businessId) return
 
-    const text = inputValue.trim()
+    const msg = inputValue.trim()
     setInputValue('')
     setSending(true)
 
-    const now = new Date().toISOString()
-    const agentMsg: ChatMessage = {
-      role: 'agent',
-      content: text,
-      time: now,
-      confidence: 'human',
+    const customerMsg: ChatMessage = {
+      role: 'customer',
+      content: msg,
+      time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
     }
 
-    const updatedMessages = [...messages, agentMsg]
-    const newStatus: ConvoStatus =
-      selected.status === 'needs_human' ? 'active' : selected.status
+    const updatedMessages = [...messages, customerMsg]
 
     setConversations((prev) =>
       prev.map((c) =>
-        c.id === selected.id
-          ? {
-              ...c,
-              messages: updatedMessages,
-              status: newStatus,
-              updated_at: now,
-            }
-          : c
+        c.id === selected.id ? { ...c, messages: updatedMessages, updated_at: new Date().toISOString() } : c
       )
     )
 
     try {
-      const { data: updatedRow, error: updateErr } = await supabase
-        .from('conversations')
-        .update({
-          messages: updatedMessages,
-          status: newStatus,
-          updated_at: now,
-        })
-        .eq('id', selected.id)
-        .select()
-        .single()
+      const res = await fetch('/api/ai/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'dm',
+          businessId,
+          conversationId: selected.id,
+          conversationHistory: messages,
+          newMessage: msg,
+          channel: selected.channel,
+          customerName: selected.customer_name,
+        }),
+      })
 
-      if (updateErr) {
-        console.error('Failed to save reply:', updateErr)
+      const result = await res.json()
+
+      if (result.isSpam) {
         setConversations((prev) =>
           prev.map((c) =>
-            c.id === selected.id
-              ? { ...c, messages, status: selected.status, updated_at: selected.updated_at }
-              : c
+            c.id === selected.id ? { ...c, status: 'spam' as ConvoStatus } : c
           )
         )
-        alert('Could not save your reply. Please try again.')
-        setSending(false)
-        return
-      }
-
-      if (updatedRow) {
-        setConversations((prev) =>
-          prev.map((c) => (c.id === selected.id ? (updatedRow as DBConversation) : c))
-        )
-      }
-
-      const webhookUrl = process.env.NEXT_PUBLIC_ZAPIER_REPLY_WEBHOOK
-      if (webhookUrl) {
-        try {
-          await fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              message: text,
-              conversationId: selected.id,
-              customerName: selected.customer_name,
-              channel: selected.channel,
-              externalThreadId: selected.external_thread_id ?? '',
-            }),
-          })
-        } catch (zapErr) {
-          console.error('Zapier webhook error:', zapErr)
+      } else {
+        const aiMsg: ChatMessage = {
+          role: 'agent',
+          content: result.content,
+          time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+          confidence: result.confidence,
         }
+
+        const finalMessages = [...updatedMessages, aiMsg]
+        const newStatus = result.confidence === 'low' ? 'needs_human' : 'active'
+
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === selected.id ? { ...c, messages: finalMessages, status: newStatus as ConvoStatus, updated_at: new Date().toISOString() } : c
+          )
+        )
+
+        await supabase
+          .from('conversations')
+          .update({
+            messages: finalMessages,
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', selected.id)
       }
     } catch (err) {
       console.error('Failed to send message:', err)
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === selected.id
-            ? { ...c, messages, status: selected.status, updated_at: selected.updated_at }
-            : c
-        )
-      )
-      alert('Something went wrong. Please try again.')
     }
 
     setSending(false)
@@ -293,7 +286,7 @@ export default function MessagesPage() {
       <div className="shrink-0">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Messages</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Reply as your business; replies are saved here and can be forwarded to the customer via Zapier.
+          All message channels in one centralized inbox. Type as a customer to test live AI responses.
         </p>
       </div>
 
@@ -399,7 +392,7 @@ export default function MessagesPage() {
                         <div className="rounded-2xl rounded-tl-md bg-white px-4 py-2.5 shadow-sm ring-1 ring-slate-200/60">
                           <p className="text-sm text-slate-900">{msg.content}</p>
                         </div>
-                        <p className="mt-1 text-xs text-slate-400">{formatMessageTime(msg.time)}</p>
+                        <p className="mt-1 text-xs text-slate-400">{msg.time}</p>
                       </div>
                     </div>
                   ) : (
@@ -414,17 +407,12 @@ export default function MessagesPage() {
                               Unsure
                             </span>
                           )}
-                          {msg.confidence === 'human' && (
-                            <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
-                              Human
-                            </span>
-                          )}
                           {msg.confidence === 'high' && (
                             <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
                               AI
                             </span>
                           )}
-                          <p className="text-xs text-slate-400">{formatMessageTime(msg.time)}</p>
+                          <p className="text-xs text-slate-400">{msg.time}</p>
                         </div>
                       </div>
                     </div>
@@ -453,7 +441,7 @@ export default function MessagesPage() {
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-                  placeholder="Type a reply..."
+                  placeholder="Type as a customer to test AI..."
                   disabled={sending}
                   className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
                 />
