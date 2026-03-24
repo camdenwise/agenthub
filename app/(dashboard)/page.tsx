@@ -65,7 +65,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function load() {
-      if (!activeBusiness) return
+      if (!activeBusiness) {
+        setLoading(false)
+        return
+      }
       setLoading(true)
 
       const { data: convos } = await supabase
@@ -105,6 +108,23 @@ export default function DashboardPage() {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-slate-500">Loading dashboard...</p>
+      </div>
+    )
+  }
+
+  if (!activeBusiness) {
+    return (
+      <div className="flex flex-col">
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+        <div className="mt-8 rounded-2xl border border-slate-200/80 bg-white p-8 shadow-sm">
+          <p className="font-medium text-slate-900">No business found</p>
+          <p className="mt-2 text-sm text-slate-600">
+            We couldn&apos;t load a business for your account. If you just signed up, finish onboarding or check that your
+            business row exists in Supabase. Strict RLS policies can also block reads—verify your policies allow
+            <code className="mx-1 rounded bg-slate-100 px-1 text-xs">SELECT</code>
+            on <code className="rounded bg-slate-100 px-1 text-xs">businesses</code> for your user.
+          </p>
+        </div>
       </div>
     )
   }
