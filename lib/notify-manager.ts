@@ -30,7 +30,7 @@ export async function notifyManager({
       lastMessage.length > 200 ? lastMessage.slice(0, 200) + "..." : lastMessage;
  
     const { error } = await resend.emails.send({
-      from: `AgentHub <notifications@${process.env.RESEND_DOMAIN || "agenthub.io"}>`,
+      from: `AgentHub <onboarding@resend.dev>`,
       to: managerEmail,
       subject: `[Action Needed] ${customerName} needs a human response — ${businessName}`,
       html: `
@@ -117,7 +117,7 @@ export async function sendLeadFollowUp({
       );
  
     const { error } = await resend.emails.send({
-      from: `${businessName} <hello@${process.env.RESEND_DOMAIN || "agenthub.io"}>`,
+      from: `${businessName} <onboarding@resend.dev>`,
       to: toEmail,
       subject,
       html: `
@@ -173,7 +173,7 @@ export async function sendReviewRequest({
       );
  
     const { error } = await resend.emails.send({
-      from: `${businessName} <hello@${process.env.RESEND_DOMAIN || "agenthub.io"}>`,
+      from: `${businessName} <onboarding@resend.dev>`,
       to: toEmail,
       subject: `${toName}, we'd love your feedback! ⭐`,
       html: `
