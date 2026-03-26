@@ -18,6 +18,35 @@ const TIPS = [
 
 const ACCEPT = '.pdf,.doc,.docx,.txt,text/plain,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
+/** `datetime-local` value in the user's local timezone (YYYY-MM-DDTHH:mm). */
+function toDatetimeLocalValue(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** Parse a `datetime-local` string as local wall time → ISO for timestamptz. */
+function fromDatetimeLocalValue(value: string) {
+  const [datePart, timePart] = value.split('T')
+  if (!datePart || !timePart) return null
+  const [y, m, d] = datePart.split('-').map(Number)
+  const [hh, mm] = timePart.split(':').map(Number)
+  if (!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return null
+  return new Date(y, m - 1, d, hh, mm, 0, 0)
+}
+
+function formatNoteDateTime(iso: string) {
+  return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+type TemporaryNote = {
+  id: string
+  business_id: string
+  content: string
+  starts_at: string
+  expires_at: string
+  created_at: string
+}
+
 type UploadedFile = {
   id: string
   name: string
@@ -37,7 +66,32 @@ export default function InstructionFilesPage() {
   const [saved, setSaved] = useState(false)
   const [docId, setDocId] = useState<string | null>(null)
 
+  const [notes, setNotes] = useState<TemporaryNote[]>([])
+  const [notesLoading, setNotesLoading] = useState(true)
+  const [noteContent, setNoteContent] = useState('')
+  const [noteStarts, setNoteStarts] = useState(() => toDatetimeLocalValue(new Date()))
+  const [noteExpires, setNoteExpires] = useState('')
+  const [addingNote, setAddingNote] = useState(false)
+
   const supabase = createClient()
+
+  async function purgeExpiredNotesAndFetch(businessId: string) {
+    const nowIso = new Date().toISOString()
+    await supabase
+      .from('temporary_notes')
+      .delete()
+      .eq('business_id', businessId)
+      .lt('expires_at', nowIso)
+
+    const { data } = await supabase
+      .from('temporary_notes')
+      .select('id, business_id, content, starts_at, expires_at, created_at')
+      .eq('business_id', businessId)
+      .gt('expires_at', nowIso)
+      .order('expires_at', { ascending: true })
+
+    setNotes((data as TemporaryNote[]) ?? [])
+  }
 
   // Load instruction doc when activeBusiness changes
   useEffect(() => {
@@ -66,6 +120,29 @@ export default function InstructionFilesPage() {
 
     if (!adminLoading) load()
   }, [activeBusiness?.id, adminLoading])
+
+  useEffect(() => {
+    async function loadNotes() {
+      if (!activeBusiness) {
+        setNotes([])
+        setNotesLoading(false)
+        return
+      }
+      setNotesLoading(true)
+      await purgeExpiredNotesAndFetch(activeBusiness.id)
+      setNotesLoading(false)
+    }
+
+    if (!adminLoading) loadNotes()
+  }, [activeBusiness?.id, adminLoading])
+
+  useEffect(() => {
+    if (activeBusiness?.id) {
+      setNoteStarts(toDatetimeLocalValue(new Date()))
+      setNoteExpires('')
+      setNoteContent('')
+    }
+  }, [activeBusiness?.id])
 
   async function handleSave() {
     if (!activeBusiness) return
@@ -153,6 +230,57 @@ export default function InstructionFilesPage() {
     setFiles((prev) => prev.filter((f) => f.id !== id))
   }
 
+  async function handleAddTemporaryNote(e: React.FormEvent) {
+    e.preventDefault()
+    if (!activeBusiness || !noteExpires.trim()) return
+
+    const starts = fromDatetimeLocalValue(noteStarts)
+    const expires = fromDatetimeLocalValue(noteExpires)
+    if (!starts || !expires) return
+    if (expires.getTime() <= starts.getTime()) {
+      alert('End time must be after start time.')
+      return
+    }
+
+    setAddingNote(true)
+    const { error } = await supabase.from('temporary_notes').insert({
+      business_id: activeBusiness.id,
+      content: noteContent.trim(),
+      starts_at: starts.toISOString(),
+      expires_at: expires.toISOString(),
+    })
+    setAddingNote(false)
+
+    if (error) {
+      console.error(error)
+      alert(error.message || 'Could not add note.')
+      return
+    }
+
+    setNoteContent('')
+    setNoteStarts(toDatetimeLocalValue(new Date()))
+    setNoteExpires('')
+    await purgeExpiredNotesAndFetch(activeBusiness.id)
+  }
+
+  async function handleDeleteTemporaryNote(id: string) {
+    if (!activeBusiness) return
+    const { error } = await supabase.from('temporary_notes').delete().eq('id', id)
+    if (error) {
+      console.error(error)
+      alert(error.message || 'Could not delete note.')
+      return
+    }
+    await purgeExpiredNotesAndFetch(activeBusiness.id)
+  }
+
+  function noteStatus(note: TemporaryNote): 'active' | 'scheduled' {
+    const now = Date.now()
+    const start = new Date(note.starts_at).getTime()
+    if (start > now) return 'scheduled'
+    return 'active'
+  }
+
   if (adminLoading || loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -238,6 +366,105 @@ export default function InstructionFilesPage() {
               placeholder="Paste or type instruction content here. Your AI agents use this to answer questions."
               className="min-h-[320px] max-h-[60vh] w-full resize-y overflow-y-auto rounded-xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               spellCheck={false} rows={16} />
+          </div>
+        </div>
+
+        <div className="mt-8 rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-5 py-4">
+            <h2 className="font-semibold text-slate-900">Temporary Notes</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Add time-limited info your AI will use automatically. Expired notes are removed automatically.
+            </p>
+          </div>
+
+          <form onSubmit={handleAddTemporaryNote} className="border-b border-slate-100 px-5 py-4 space-y-4">
+            <div>
+              <label htmlFor="temp-note-content" className="block text-xs font-medium text-slate-600">Note</label>
+              <textarea
+                id="temp-note-content"
+                value={noteContent}
+                onChange={(e) => setNoteContent(e.target.value)}
+                placeholder="e.g., We are closed this Saturday and Sunday due to weather"
+                rows={3}
+                className="mt-1.5 w-full resize-y rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="temp-note-starts" className="block text-xs font-medium text-slate-600">Starts</label>
+                <input
+                  id="temp-note-starts"
+                  type="datetime-local"
+                  value={noteStarts}
+                  onChange={(e) => setNoteStarts(e.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label htmlFor="temp-note-expires" className="block text-xs font-medium text-slate-600">
+                  Expires <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="temp-note-expires"
+                  type="datetime-local"
+                  value={noteExpires}
+                  onChange={(e) => setNoteExpires(e.target.value)}
+                  required
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+            <button
+              type="submit"
+              disabled={addingNote || !noteExpires.trim()}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {addingNote ? 'Adding…' : 'Add Note'}
+            </button>
+          </form>
+
+          <div className="px-5 py-4">
+            {notesLoading ? (
+              <p className="text-sm text-slate-500">Loading notes…</p>
+            ) : notes.length === 0 ? (
+              <p className="text-sm text-slate-500">No temporary notes yet. Add one above.</p>
+            ) : (
+              <ul className="space-y-3">
+                {notes.map((note) => {
+                  const status = noteStatus(note)
+                  return (
+                    <li
+                      key={note.id}
+                      className="flex gap-3 rounded-xl border border-slate-100 bg-slate-50/50 px-4 py-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="whitespace-pre-wrap text-sm text-slate-900">{note.content}</p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                          {status === 'active' ? (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-800">Active</span>
+                          ) : (
+                            <span className="rounded-full bg-blue-100 px-2 py-0.5 font-medium text-blue-800">Scheduled</span>
+                          )}
+                          <span>
+                            {formatNoteDateTime(note.starts_at)} → {formatNoteDateTime(note.expires_at)}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTemporaryNote(note.id)}
+                        className="shrink-0 self-start rounded-lg p-2 text-slate-400 hover:bg-slate-200/80 hover:text-slate-700"
+                        aria-label="Delete note"
+                      >
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </div>
         </div>
       </div>
