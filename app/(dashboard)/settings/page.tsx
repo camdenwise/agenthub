@@ -58,6 +58,15 @@ const TABS: { id: SettingsTab; label: string; icon: string }[] = [
 ]
 
 const INDUSTRIES = ['Gym', 'Salon', 'Restaurant', 'Retail', 'Other']
+const US_TIMEZONES = [
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Phoenix',
+  'America/Los_Angeles',
+  'America/Anchorage',
+  'Pacific/Honolulu',
+]
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('business-profile')
@@ -66,6 +75,9 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState({
     businessName: '',
     address: '',
+    city: '',
+    state: '',
+    timezone: 'America/New_York',
     phone: '',
     website: '',
     industry: 'Gym',
@@ -91,6 +103,9 @@ export default function SettingsPage() {
         setProfile({
           businessName: business.name || '',
           address: business.address || '',
+          city: business.city || '',
+          state: business.state || '',
+          timezone: business.timezone || 'America/New_York',
           phone: business.phone || '',
           website: business.website || '',
           industry: business.industry || 'Gym',
@@ -224,6 +239,9 @@ export default function SettingsPage() {
                 await supabase.from('businesses').update({
                   name: profile.businessName,
                   address: profile.address,
+                  city: profile.city,
+                  state: profile.state,
+                  timezone: profile.timezone,
                   phone: profile.phone,
                   website: profile.website,
                   industry: profile.industry,
@@ -242,6 +260,25 @@ export default function SettingsPage() {
                 <label className="block text-sm font-medium text-slate-700">Address</label>
                 <input type="text" value={profile.address} onChange={(e) => setProfile({ ...profile, address: e.target.value })}
                   className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">City</label>
+                  <input type="text" value={profile.city} onChange={(e) => setProfile({ ...profile, city: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">State</label>
+                  <input type="text" value={profile.state} onChange={(e) => setProfile({ ...profile, state: e.target.value })}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Timezone</label>
+                <select value={profile.timezone} onChange={(e) => setProfile({ ...profile, timezone: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                  {US_TIMEZONES.map((tz) => (<option key={tz} value={tz}>{tz}</option>))}
+                </select>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
