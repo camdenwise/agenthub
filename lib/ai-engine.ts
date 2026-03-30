@@ -2,7 +2,7 @@
 // Core AI Engine — powers all three agents (DM responder, Lead agent, Review agent)
  
 import Anthropic from "@anthropic-ai/sdk";
-import { createClient as createSupabaseServerClient } from "@/lib/supabase-server";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  
 // ============================================================
 // TYPES
@@ -95,9 +95,11 @@ export function detectSpam(message: string): boolean {
 // SYSTEM PROMPTS
 // ============================================================
  
-async function getActiveTemporaryNotes(businessId: string): Promise<string[]> {
+async function getActiveTemporaryNotes(
+  supabase: SupabaseClient,
+  businessId: string
+): Promise<string[]> {
   try {
-    const supabase = await createSupabaseServerClient();
     const nowIso = new Date().toISOString();
 
     const { data, error } = await supabase
@@ -122,7 +124,7 @@ async function getActiveTemporaryNotes(businessId: string): Promise<string[]> {
   }
 }
 
-async function buildSystemPrompt(request: AIRequest): Promise<string> {
+async function buildSystemPrompt(request: AIRequest, supabase: SupabaseClient): Promise<string> {
   const baseRules = `CRITICAL RULES:
 1. You ONLY answer questions using information from the INSTRUCTION DOCUMENT below. Do NOT make up information, guess, or use general knowledge.
 2. If a question cannot be answered from the instruction document, you MUST start your response with exactly "[UNSURE]" followed by a brief, friendly explanation that you'll get someone to help.
@@ -130,7 +132,7 @@ async function buildSystemPrompt(request: AIRequest): Promise<string> {
 4. Match the tone described in the instruction document.
 5. Never share internal business information not meant for customers (like pricing margins, staff details, etc.).`;
 
-  const activeTemporaryNotes = await getActiveTemporaryNotes(request.businessId);
+  const activeTemporaryNotes = await getActiveTemporaryNotes(supabase, request.businessId);
   const temporaryUpdatesSection =
     activeTemporaryNotes.length > 0
       ? `\n\nTEMPORARY UPDATES (these OVERRIDE any conflicting information above. If a temporary note contradicts the main instruction document, always use the temporary note instead):\n${activeTemporaryNotes.map((note) => `- ${note}`).join("\n")}`
@@ -247,7 +249,12 @@ export async function callAIEngine(request: AIRequest): Promise<AIResponse> {
   }
  
   try {
-    const systemPrompt = await buildSystemPrompt(request);
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    const systemPrompt = await buildSystemPrompt(request, supabase);
     const messages = buildMessages(request);
  
     const response = await getClient().messages.create({
