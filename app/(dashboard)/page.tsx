@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase'
 import { useAdmin } from '@/lib/admin-context'
+import { DEFAULT_BUSINESS_TIMEZONE, formatShortInBusinessTimezone } from '@/lib/timezone'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
@@ -26,16 +27,6 @@ function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
-function timeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'Just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
-}
-
 const STATUS_CLASSES: Record<string, string> = {
   new: 'bg-blue-100 text-blue-800',
   contacted: 'bg-amber-100 text-amber-800',
@@ -52,6 +43,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function DashboardPage() {
   const { activeBusiness, loading: adminLoading } = useAdmin()
+  const businessTimezone = activeBusiness?.timezone || DEFAULT_BUSINESS_TIMEZONE
   const [loading, setLoading] = useState(true)
   const [totalConvos, setTotalConvos] = useState(0)
   const [needsHumanCount, setNeedsHumanCount] = useState(0)
@@ -187,7 +179,7 @@ export default function DashboardPage() {
                       <p className="font-medium text-slate-900">{conv.customer_name}</p>
                       <p className="truncate text-sm text-slate-500">{lastMsg}</p>
                     </div>
-                    <span className="shrink-0 text-xs text-slate-400">{timeAgo(conv.updated_at)}</span>
+                    <span className="shrink-0 text-xs text-slate-400">{formatShortInBusinessTimezone(conv.updated_at, businessTimezone)}</span>
                   </li>
                 )
               })}
@@ -213,6 +205,7 @@ export default function DashboardPage() {
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-slate-900">{lead.name}</p>
                     <p className="text-sm text-slate-500">{lead.interest}</p>
+                    <p className="mt-0.5 text-xs text-slate-400">{formatShortInBusinessTimezone(lead.created_at, businessTimezone)}</p>
                   </div>
                   <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_CLASSES[lead.status] ?? 'bg-slate-100 text-slate-700'}`}>
                     {STATUS_LABELS[lead.status] ?? lead.status}

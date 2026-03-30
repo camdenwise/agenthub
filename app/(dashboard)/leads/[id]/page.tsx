@@ -7,6 +7,7 @@ import {
 import type { Lead } from '@/lib/leads-data'
 import { createClient } from '@/lib/supabase'
 import { useAdmin } from '@/lib/admin-context'
+import { DEFAULT_BUSINESS_TIMEZONE, formatInBusinessTimezone } from '@/lib/timezone'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
@@ -24,6 +25,7 @@ export default function LeadDetailPage() {
   const params = useParams()
   const id = params.id as string
   const { activeBusiness, loading: adminLoading } = useAdmin()
+  const businessTimezone = activeBusiness?.timezone || DEFAULT_BUSINESS_TIMEZONE
   const [lead, setLead] = useState<Lead | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
@@ -148,19 +150,36 @@ export default function LeadDetailPage() {
             </div>
           )}
           <div className="mt-4 text-xs text-slate-400">
-            Submitted {new Date(lead.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            Submitted{' '}
+            {formatInBusinessTimezone(lead.created_at, businessTimezone, {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+            })}
           </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-900">AI Follow-Up Email</h2>
-            {lead.follow_up_email?.sent_at && (
+            {(lead.follow_up_email?.sent_at || lead.follow_up_email?.sentAt) && (
               <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
                 <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
-                Sent {new Date(lead.follow_up_email.sent_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                Sent{' '}
+                {formatInBusinessTimezone(
+                  (lead.follow_up_email.sent_at || lead.follow_up_email.sentAt) as string,
+                  businessTimezone,
+                  {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  }
+                )}
               </span>
             )}
           </div>

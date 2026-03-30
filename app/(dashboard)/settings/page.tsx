@@ -1,7 +1,9 @@
 'use client'
 
 import { BellIcon as SharedBellIcon } from '@/components/icons/BellIcon'
-import { useEffect, useState } from 'react'
+import { useAdmin } from '@/lib/admin-context'
+import { DEFAULT_BUSINESS_TIMEZONE, formatShortInBusinessTimezone } from '@/lib/timezone'
+import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase'
 
 type SettingsTab =
@@ -70,6 +72,8 @@ const US_TIMEZONES = [
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('business-profile')
+  const { activeBusiness, loading: adminLoading } = useAdmin()
+  const businessTimezone = activeBusiness?.timezone || DEFAULT_BUSINESS_TIMEZONE
 
   // Business Profile — loads from Supabase
   const [profile, setProfile] = useState({
@@ -77,7 +81,7 @@ export default function SettingsPage() {
     address: '',
     city: '',
     state: '',
-    timezone: 'America/New_York',
+    timezone: DEFAULT_BUSINESS_TIMEZONE,
     phone: '',
     website: '',
     industry: 'Gym',
@@ -85,27 +89,44 @@ export default function SettingsPage() {
     managerEmail: '',
   })
   const [profileSaved, setProfileSaved] = useState(false)
-  const [businessId, setBusinessId] = useState<string | null>(null)
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null)
+  const [profileLoading, setProfileLoading] = useState(true)
 
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
+  const activeBusinessId = activeBusiness?.id ?? null
 
   useEffect(() => {
     async function loadProfile() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { data: business } = await supabase
+      if (adminLoading) return
+      if (!activeBusinessId) {
+        setProfileLoading(false)
+        return
+      }
+      setProfileLoading(true)
+      setProfileLoadError(null)
+
+      const { data: business, error } = await supabase
         .from('businesses')
-        .select('*')
-        .eq('user_id', user.id)
+        .select(
+          'id, name, address, city, state, timezone, phone, website, industry, manager_name, manager_email'
+        )
+        .eq('id', activeBusinessId)
         .maybeSingle()
+
+      if (error) {
+        console.error('Settings: failed to load business profile', error)
+        setProfileLoadError(error.message || 'Could not load business profile.')
+        setProfileLoading(false)
+        return
+      }
+
       if (business) {
-        setBusinessId(business.id)
         setProfile({
           businessName: business.name || '',
           address: business.address || '',
-          city: business.city || '',
-          state: business.state || '',
-          timezone: business.timezone || 'America/New_York',
+          city: business.city ?? '',
+          state: business.state ?? '',
+          timezone: business.timezone || DEFAULT_BUSINESS_TIMEZONE,
           phone: business.phone || '',
           website: business.website || '',
           industry: business.industry || 'Gym',
@@ -113,9 +134,10 @@ export default function SettingsPage() {
           managerEmail: business.manager_email || '',
         })
       }
+      setProfileLoading(false)
     }
     loadProfile()
-  }, [])
+  }, [adminLoading, activeBusinessId, supabase])
 
   // Channels
   const [channels, setChannels] = useState<ChannelItem[]>([
@@ -170,7 +192,15 @@ export default function SettingsPage() {
 
   function toggleChannel(id: string) {
     setChannels((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, connected: !c.connected, connectedAt: !c.connected ? new Date().toLocaleDateString('en-US') : undefined } : c))
+      prev.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              connected: !c.connected,
+              connectedAt: !c.connected ? formatShortInBusinessTimezone(new Date().toISOString(), businessTimezone) : undefined,
+            }
+          : c
+      )
     )
   }
   function openChannelModal() { setChannelForm({ name: '', description: '', account: '' }); setModalOpen('channel') }
@@ -232,22 +262,38 @@ export default function SettingsPage() {
           <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Business Profile</h2>
             <p className="mt-1 text-sm text-slate-500">Basic information about your business</p>
+            {(adminLoading || profileLoading) && (
+              <p className="mt-4 text-sm text-slate-500">Loading profile…</p>
+            )}
+            {profileLoadError && (
+              <p className="mt-4 text-sm text-red-600">{profileLoadError}</p>
+            )}
             <form className="mt-6 space-y-4"
               onSubmit={async (e) => {
                 e.preventDefault()
-                if (!businessId) return
-                await supabase.from('businesses').update({
-                  name: profile.businessName,
-                  address: profile.address,
-                  city: profile.city,
-                  state: profile.state,
-                  timezone: profile.timezone,
-                  phone: profile.phone,
-                  website: profile.website,
-                  industry: profile.industry,
-                  manager_name: profile.managerName,
-                  manager_email: profile.managerEmail,
-                }).eq('id', businessId)
+                if (!activeBusiness) return
+                const { error } = await supabase
+                  .from('businesses')
+                  .update({
+                    name: profile.businessName,
+                    address: profile.address,
+                    city: profile.city,
+                    state: profile.state,
+                    timezone: profile.timezone,
+                    phone: profile.phone,
+                    website: profile.website,
+                    industry: profile.industry,
+                    manager_name: profile.managerName,
+                    manager_email: profile.managerEmail,
+                  })
+                  .eq('id', activeBusiness.id)
+                  .select('id')
+                  .maybeSingle()
+                if (error) {
+                  console.error('Settings: failed to save business profile', error)
+                  alert(error.message || 'Could not save changes.')
+                  return
+                }
                 setProfileSaved(true)
                 setTimeout(() => setProfileSaved(false), 3000)
               }}>
@@ -315,7 +361,11 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </div>
-              <button type="submit" className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500">
+              <button
+                type="submit"
+                disabled={adminLoading || profileLoading || !activeBusiness}
+                className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
                 {profileSaved ? 'Saved!' : 'Save Changes'}
               </button>
             </form>

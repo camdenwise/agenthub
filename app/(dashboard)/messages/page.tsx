@@ -3,6 +3,7 @@
 import { BellIcon } from '@/components/icons/BellIcon'
 import { createClient } from '@/lib/supabase'
 import { useAdmin } from '@/lib/admin-context'
+import { DEFAULT_BUSINESS_TIMEZONE, formatInBusinessTimezone, formatShortInBusinessTimezone } from '@/lib/timezone'
 import { useEffect, useRef, useState } from 'react'
 
 type Channel = 'instagram' | 'facebook' | 'email' | 'web_chat'
@@ -45,14 +46,13 @@ function getAvatarColor(channel: Channel) {
   }
 }
 
-function timeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'Just now'
-  if (mins < 60) return `${mins} min ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs} hr ago`
-  return `${Math.floor(hrs / 24)}d ago`
+function formatMessageTimestamp(value: string | undefined, timezone: string) {
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (!Number.isNaN(parsed.getTime())) {
+    return formatInBusinessTimezone(parsed.toISOString(), timezone, { hour: 'numeric', minute: '2-digit' })
+  }
+  return value
 }
 
 function ChannelIcon({ channel }: { channel: Channel }) {
@@ -68,6 +68,7 @@ function ChannelIcon({ channel }: { channel: Channel }) {
 
 export default function MessagesPage() {
   const { activeBusiness, loading: adminLoading } = useAdmin()
+  const businessTimezone = activeBusiness?.timezone || DEFAULT_BUSINESS_TIMEZONE
   const [conversations, setConversations] = useState<DBConversation[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
@@ -156,7 +157,7 @@ export default function MessagesPage() {
     const customerMsg: ChatMessage = {
       role: 'customer',
       content: msg,
-      time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+      time: new Date().toISOString(),
     }
 
     const updatedMessages = [...messages, customerMsg]
@@ -192,7 +193,7 @@ export default function MessagesPage() {
         const aiMsg: ChatMessage = {
           role: 'agent',
           content: result.content,
-          time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+          time: new Date().toISOString(),
           confidence: result.confidence,
         }
 
@@ -266,7 +267,7 @@ export default function MessagesPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
                           <span className="truncate font-medium text-slate-900">{conv.customer_name}</span>
-                          <span className="shrink-0 text-xs text-slate-400">{timeAgo(conv.updated_at)}</span>
+                          <span className="shrink-0 text-xs text-slate-400">{formatShortInBusinessTimezone(conv.updated_at, businessTimezone)}</span>
                         </div>
                         <p className="mt-0.5 truncate text-sm text-slate-500">{getLastMessage(conv)}</p>
                         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -321,7 +322,7 @@ export default function MessagesPage() {
                         <div className="rounded-2xl rounded-tl-md bg-white px-4 py-2.5 shadow-sm ring-1 ring-slate-200/60">
                           <p className="text-sm text-slate-900">{msg.content}</p>
                         </div>
-                        <p className="mt-1 text-xs text-slate-400">{msg.time}</p>
+                        <p className="mt-1 text-xs text-slate-400">{formatMessageTimestamp(msg.time, businessTimezone)}</p>
                       </div>
                     </div>
                   ) : (
@@ -333,7 +334,7 @@ export default function MessagesPage() {
                         <div className="mt-1 flex items-center justify-end gap-2">
                           {msg.confidence === 'low' && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Unsure</span>}
                           {msg.confidence === 'high' && <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">AI</span>}
-                          <p className="text-xs text-slate-400">{msg.time}</p>
+                          <p className="text-xs text-slate-400">{formatMessageTimestamp(msg.time, businessTimezone)}</p>
                         </div>
                       </div>
                     </div>

@@ -3,6 +3,7 @@
  
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
+import { DEFAULT_BUSINESS_TIMEZONE, formatInBusinessTimezone } from "@/lib/timezone";
  
 // ============================================================
 // TYPES
@@ -106,10 +107,18 @@ function getServiceClient() {
 // SYSTEM PROMPTS
 // ============================================================
  
-async function getActiveTemporaryNotes(businessId: string): Promise<string[]> {
+async function getActiveTemporaryNotes(
+  businessId: string
+): Promise<{ notes: string[]; timezone: string }> {
   try {
     const supabase = getServiceClient();
     const nowIso = new Date().toISOString();
+    const { data: businessData } = await supabase
+      .from("businesses")
+      .select("timezone")
+      .eq("id", businessId)
+      .maybeSingle();
+    const timezone = businessData?.timezone || DEFAULT_BUSINESS_TIMEZONE;
 
     const { data, error } = await supabase
       .from("temporary_notes")
@@ -121,21 +130,25 @@ async function getActiveTemporaryNotes(businessId: string): Promise<string[]> {
 
     if (error) {
       console.error("Temporary notes fetch error:", error);
-      return [];
+      return { notes: [], timezone };
     }
 
-    return (data ?? [])
+    const notes = (data ?? [])
       .map((note) => note.content?.trim())
       .filter((content): content is string => Boolean(content));
+    return { notes, timezone };
   } catch (error) {
     console.error("Temporary notes client error:", error);
-    return [];
+    return { notes: [], timezone: DEFAULT_BUSINESS_TIMEZONE };
   }
 }
 
 async function buildSystemPrompt(request: AIRequest): Promise<string> {
-  const activeTemporaryNotes = await getActiveTemporaryNotes(request.businessId);
-  console.log("TEMP NOTES DEBUG:", activeTemporaryNotes);
+  const { notes: activeTemporaryNotes, timezone } = await getActiveTemporaryNotes(request.businessId);
+  const businessLocalTime = formatInBusinessTimezone(new Date().toISOString(), timezone, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 
   const temporaryUpdatesSection =
     activeTemporaryNotes.length > 0
@@ -149,12 +162,14 @@ async function buildSystemPrompt(request: AIRequest): Promise<string> {
 4. Never mention that you are an AI, a bot, or that you're reading from a document. Respond as if you are a friendly staff member.
 5. Match the tone described in the instruction document.
 6. Never share internal business information not meant for customers (like pricing margins, staff details, etc.).`;
+  const timezoneContext = `This business is in the ${timezone} timezone. The current local time for this business is ${businessLocalTime}.`;
  
   switch (request.mode) {
     case "dm":
       return `You are responding to a customer's social media DM or message on behalf of a business. Be conversational, warm, and concise (2-4 sentences max). Use casual, friendly language like you're talking to a friend. If someone seems nervous or unsure, be extra encouraging and welcoming.
  
 ${baseRules}
+${timezoneContext}
  
 INSTRUCTION DOCUMENT:
 ${temporaryUpdatesSection}${request.instructionDoc}`;
@@ -174,6 +189,7 @@ Guidelines:
   [email body here]
  
 ${baseRules}
+${timezoneContext}
  
 INSTRUCTION DOCUMENT:
 ${temporaryUpdatesSection}${request.instructionDoc}`;
@@ -189,6 +205,7 @@ Guidelines:
 - Don't be pushy — make it feel like a personal note, not a marketing email
  
 ${baseRules}
+${timezoneContext}
  
 INSTRUCTION DOCUMENT:
 ${temporaryUpdatesSection}${request.instructionDoc}`;

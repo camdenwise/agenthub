@@ -7,11 +7,13 @@ import {
 import type { Lead } from '@/lib/leads-data'
 import { createClient } from '@/lib/supabase'
 import { useAdmin } from '@/lib/admin-context'
+import { DEFAULT_BUSINESS_TIMEZONE, formatInBusinessTimezone } from '@/lib/timezone'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 export default function LeadsPage() {
   const { activeBusiness, loading: adminLoading } = useAdmin()
+  const businessTimezone = activeBusiness?.timezone || DEFAULT_BUSINESS_TIMEZONE
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -86,18 +88,34 @@ export default function LeadsPage() {
                     </td>
                     <td className="px-5 py-4">
                       {lead.follow_up_email ? (
-                        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
-                          <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                          </svg>
-                          Sent
+                        <span className="inline-flex flex-col gap-0.5 text-sm font-medium text-emerald-700">
+                          <span className="inline-flex items-center gap-1.5">
+                            <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                            Sent
+                          </span>
+                          {(lead.follow_up_email.sent_at || lead.follow_up_email.sentAt) && (
+                            <span className="text-xs font-normal text-slate-500">
+                              {formatInBusinessTimezone(
+                                (lead.follow_up_email.sent_at || lead.follow_up_email.sentAt) as string,
+                                businessTimezone,
+                                { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
+                              )}
+                            </span>
+                          )}
                         </span>
                       ) : (
                         <span className="text-sm text-slate-500">Pending</span>
                       )}
                     </td>
                     <td className="px-5 py-4 text-sm text-slate-600">
-                      {new Date(lead.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      {formatInBusinessTimezone(lead.created_at, businessTimezone, {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
                     </td>
                     <td className="px-5 py-4 text-right">
                       <Link href={`/leads/${lead.id}`}

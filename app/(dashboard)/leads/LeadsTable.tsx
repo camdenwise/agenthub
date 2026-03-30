@@ -5,10 +5,14 @@ import {
   getStatusLabel,
 } from '@/lib/leads-data'
 import type { Lead } from '@/lib/leads-data'
+import { useAdmin } from '@/lib/admin-context'
+import { DEFAULT_BUSINESS_TIMEZONE, formatInBusinessTimezone } from '@/lib/timezone'
 import { useRouter } from 'next/navigation'
 
 export function LeadsTable({ leads }: { leads: Lead[] }) {
   const router = useRouter()
+  const { activeBusiness } = useAdmin()
+  const businessTimezone = activeBusiness?.timezone || DEFAULT_BUSINESS_TIMEZONE
 
   return (
     <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
@@ -87,7 +91,7 @@ export function LeadsTable({ leads }: { leads: Lead[] }) {
                   )}
                 </td>
                 <td className="px-5 py-4 text-sm text-slate-600">
-                  {new Date(lead.created_at).toLocaleDateString('en-US', {
+                  {formatInBusinessTimezone(lead.created_at, businessTimezone, {
                     month: 'short',
                     day: 'numeric',
                     hour: 'numeric',

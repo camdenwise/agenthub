@@ -2,6 +2,12 @@
 
 import { createClient } from '@/lib/supabase'
 import { useAdmin } from '@/lib/admin-context'
+import {
+  DEFAULT_BUSINESS_TIMEZONE,
+  datetimeLocalWallTimeToUtc,
+  formatInBusinessTimezone,
+  toDatetimeLocalValue,
+} from '@/lib/timezone'
 import { useEffect, useRef, useState } from 'react'
 
 const TIPS = [
@@ -18,24 +24,8 @@ const TIPS = [
 
 const ACCEPT = '.pdf,.doc,.docx,.txt,text/plain,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
-/** `datetime-local` value in the user's local timezone (YYYY-MM-DDTHH:mm). */
-function toDatetimeLocalValue(d: Date) {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-/** Parse a `datetime-local` string as local wall time → ISO for timestamptz. */
-function fromDatetimeLocalValue(value: string) {
-  const [datePart, timePart] = value.split('T')
-  if (!datePart || !timePart) return null
-  const [y, m, d] = datePart.split('-').map(Number)
-  const [hh, mm] = timePart.split(':').map(Number)
-  if (!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return null
-  return new Date(y, m - 1, d, hh, mm, 0, 0)
-}
-
-function formatNoteDateTime(iso: string) {
-  return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+function formatNoteDateTime(iso: string, timezone: string) {
+  return formatInBusinessTimezone(iso, timezone, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 type TemporaryNote = {
@@ -57,6 +47,7 @@ type UploadedFile = {
 
 export default function InstructionFilesPage() {
   const { activeBusiness, loading: adminLoading } = useAdmin()
+  const businessTimezone = activeBusiness?.timezone || DEFAULT_BUSINESS_TIMEZONE
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [editorContent, setEditorContent] = useState('')
   const [files, setFiles] = useState<UploadedFile[]>([])
@@ -69,7 +60,7 @@ export default function InstructionFilesPage() {
   const [notes, setNotes] = useState<TemporaryNote[]>([])
   const [notesLoading, setNotesLoading] = useState(true)
   const [noteContent, setNoteContent] = useState('')
-  const [noteStarts, setNoteStarts] = useState(() => toDatetimeLocalValue(new Date()))
+  const [noteStarts, setNoteStarts] = useState('')
   const [noteStartsTouched, setNoteStartsTouched] = useState(false)
   const [noteExpires, setNoteExpires] = useState('')
   const [addingNote, setAddingNote] = useState(false)
@@ -137,14 +128,17 @@ export default function InstructionFilesPage() {
     if (!adminLoading) loadNotes()
   }, [activeBusiness?.id, adminLoading])
 
+  /* Reset temporary-note draft when switching business or timezone */
+  /* eslint-disable react-hooks/set-state-in-effect -- form reset on business/timezone change */
   useEffect(() => {
     if (activeBusiness?.id) {
-      setNoteStarts(toDatetimeLocalValue(new Date()))
+      setNoteStarts(toDatetimeLocalValue(new Date(), businessTimezone))
       setNoteStartsTouched(false)
       setNoteExpires('')
       setNoteContent('')
     }
-  }, [activeBusiness?.id])
+  }, [activeBusiness?.id, businessTimezone])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   async function handleSave() {
     if (!activeBusiness) return
@@ -190,7 +184,11 @@ export default function InstructionFilesPage() {
 
   function handleFileSelect(fileList: FileList | null) {
     if (!fileList?.length) return
-    const date = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    const date = formatInBusinessTimezone(new Date().toISOString(), businessTimezone, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    })
 
     const readFile = (file: File): Promise<UploadedFile> => {
       const id = `file-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -236,15 +234,15 @@ export default function InstructionFilesPage() {
     e.preventDefault()
     if (!activeBusiness || !noteExpires.trim()) return
 
-    const expires = fromDatetimeLocalValue(noteExpires)
+    const expires = datetimeLocalWallTimeToUtc(noteExpires, businessTimezone)
     if (!expires) return
 
-    const now = new Date()
-    const starts = noteStartsTouched ? fromDatetimeLocalValue(noteStarts) : null
+    const nowMs = Date.now()
+    const starts = noteStartsTouched ? datetimeLocalWallTimeToUtc(noteStarts, businessTimezone) : null
     if (noteStartsTouched && !starts) return
 
-    const hasFutureStart = Boolean(starts && starts.getTime() > now.getTime())
-    const effectiveStartMs = hasFutureStart ? starts!.getTime() : now.getTime()
+    const hasFutureStart = Boolean(starts && starts.getTime() > nowMs)
+    const effectiveStartMs = hasFutureStart ? starts!.getTime() : nowMs
     if (expires.getTime() <= effectiveStartMs) {
       alert('End time must be after start time.')
       return
@@ -275,7 +273,7 @@ export default function InstructionFilesPage() {
     }
 
     setNoteContent('')
-    setNoteStarts(toDatetimeLocalValue(new Date()))
+    setNoteStarts(toDatetimeLocalValue(new Date(), businessTimezone))
     setNoteStartsTouched(false)
     setNoteExpires('')
     await purgeExpiredNotesAndFetch(activeBusiness.id)
@@ -293,10 +291,8 @@ export default function InstructionFilesPage() {
   }
 
   function noteStatus(note: TemporaryNote): 'active' | 'scheduled' {
-    const now = Date.now()
-    const start = new Date(note.starts_at).getTime()
-    if (start > now) return 'scheduled'
-    return 'active'
+    // ISO strings compare lexicographically; avoids impure Date.now() in render (react-hooks/purity).
+    return note.starts_at > new Date().toISOString() ? 'scheduled' : 'active'
   }
 
   if (adminLoading || loading) {
@@ -413,7 +409,7 @@ export default function InstructionFilesPage() {
                 <input
                   id="temp-note-starts"
                   type="datetime-local"
-                  value={noteStarts}
+                  value={noteStarts || toDatetimeLocalValue(new Date(), businessTimezone)}
                   onChange={(e) => {
                     setNoteStartsTouched(true)
                     setNoteStarts(e.target.value)
@@ -467,7 +463,7 @@ export default function InstructionFilesPage() {
                             <span className="rounded-full bg-blue-100 px-2 py-0.5 font-medium text-blue-800">Scheduled</span>
                           )}
                           <span>
-                            {formatNoteDateTime(note.starts_at)} → {formatNoteDateTime(note.expires_at)}
+                            {formatNoteDateTime(note.starts_at, businessTimezone)} → {formatNoteDateTime(note.expires_at, businessTimezone)}
                           </span>
                         </div>
                       </div>

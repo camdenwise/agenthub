@@ -6,6 +6,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 type Business = {
   id: string
   name: string
+  timezone: string | null
 }
 
 type AdminContextType = {
@@ -44,7 +45,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       // Check if current user is admin
       const { data: myBusiness } = await supabase
         .from('businesses')
-        .select('id, name, is_admin')
+        .select('id, name, is_admin, timezone')
         .eq('user_id', user.id)
         .maybeSingle()
 
@@ -56,7 +57,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
         // Load all businesses for the switcher
         const { data: allBiz } = await supabase
           .from('businesses')
-          .select('id, name')
+          .select('id, name, timezone')
           .order('name', { ascending: true })
 
         if (allBiz) {
@@ -64,10 +65,10 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Default to the admin's own business
-        setActiveBusiness({ id: myBusiness.id, name: myBusiness.name })
+        setActiveBusiness({ id: myBusiness.id, name: myBusiness.name, timezone: myBusiness.timezone ?? null })
       } else {
         // Regular user — just use their own business
-        setActiveBusiness({ id: myBusiness.id, name: myBusiness.name })
+        setActiveBusiness({ id: myBusiness.id, name: myBusiness.name, timezone: myBusiness.timezone ?? null })
       }
 
       setLoading(false)

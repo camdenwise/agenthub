@@ -182,9 +182,8 @@ async function processIncomingMessage(params: ProcessMessageParams) {
     .single();
 
   const now = new Date().toISOString();
-  const timeStr = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 
-  const customerMsg = { role: "customer", content: messageText, time: timeStr };
+  const customerMsg = { role: "customer", content: messageText, time: now };
 
   if (!conversation) {
     // Create new conversation
@@ -264,7 +263,7 @@ async function processIncomingMessage(params: ProcessMessageParams) {
     }
 
     // Save AI response to conversation
-    const agentMsg = { role: "agent", content: aiResult.content, time: timeStr, confidence: "high" };
+    const agentMsg = { role: "agent", content: aiResult.content, time: now, confidence: "high" };
     const finalMessages = [...conversation.messages, agentMsg];
 
     await supabase
@@ -273,7 +272,7 @@ async function processIncomingMessage(params: ProcessMessageParams) {
       .eq("id", conversation.id);
   } else {
     // Low confidence — don't reply, flag for human, notify manager
-    const agentMsg = { role: "agent", content: aiResult.content, time: timeStr, confidence: "low" };
+    const agentMsg = { role: "agent", content: aiResult.content, time: now, confidence: "low" };
     const finalMessages = [...conversation.messages, agentMsg];
 
     await supabase
