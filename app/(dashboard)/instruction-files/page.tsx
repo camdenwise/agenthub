@@ -70,6 +70,7 @@ export default function InstructionFilesPage() {
   const [notesLoading, setNotesLoading] = useState(true)
   const [noteContent, setNoteContent] = useState('')
   const [noteStarts, setNoteStarts] = useState(() => toDatetimeLocalValue(new Date()))
+  const [noteStartsTouched, setNoteStartsTouched] = useState(false)
   const [noteExpires, setNoteExpires] = useState('')
   const [addingNote, setAddingNote] = useState(false)
 
@@ -139,6 +140,7 @@ export default function InstructionFilesPage() {
   useEffect(() => {
     if (activeBusiness?.id) {
       setNoteStarts(toDatetimeLocalValue(new Date()))
+      setNoteStartsTouched(false)
       setNoteExpires('')
       setNoteContent('')
     }
@@ -234,21 +236,36 @@ export default function InstructionFilesPage() {
     e.preventDefault()
     if (!activeBusiness || !noteExpires.trim()) return
 
-    const starts = fromDatetimeLocalValue(noteStarts)
     const expires = fromDatetimeLocalValue(noteExpires)
-    if (!starts || !expires) return
-    if (expires.getTime() <= starts.getTime()) {
+    if (!expires) return
+
+    const now = new Date()
+    const starts = noteStartsTouched ? fromDatetimeLocalValue(noteStarts) : null
+    if (noteStartsTouched && !starts) return
+
+    const hasFutureStart = Boolean(starts && starts.getTime() > now.getTime())
+    const effectiveStartMs = hasFutureStart ? starts!.getTime() : now.getTime()
+    if (expires.getTime() <= effectiveStartMs) {
       alert('End time must be after start time.')
       return
     }
 
     setAddingNote(true)
-    const { error } = await supabase.from('temporary_notes').insert({
+    const insertPayload: {
+      business_id: string
+      content: string
+      expires_at: string
+      starts_at?: string
+    } = {
       business_id: activeBusiness.id,
       content: noteContent.trim(),
-      starts_at: starts.toISOString(),
       expires_at: expires.toISOString(),
-    })
+    }
+    if (hasFutureStart) {
+      insertPayload.starts_at = starts!.toISOString()
+    }
+
+    const { error } = await supabase.from('temporary_notes').insert(insertPayload)
     setAddingNote(false)
 
     if (error) {
@@ -259,6 +276,7 @@ export default function InstructionFilesPage() {
 
     setNoteContent('')
     setNoteStarts(toDatetimeLocalValue(new Date()))
+    setNoteStartsTouched(false)
     setNoteExpires('')
     await purgeExpiredNotesAndFetch(activeBusiness.id)
   }
@@ -396,7 +414,10 @@ export default function InstructionFilesPage() {
                   id="temp-note-starts"
                   type="datetime-local"
                   value={noteStarts}
-                  onChange={(e) => setNoteStarts(e.target.value)}
+                  onChange={(e) => {
+                    setNoteStartsTouched(true)
+                    setNoteStarts(e.target.value)
+                  }}
                   className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
               </div>
