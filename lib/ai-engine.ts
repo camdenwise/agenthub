@@ -2,6 +2,7 @@
 // Core AI Engine — powers all three agents (DM responder, Lead agent, Review agent)
  
 import Anthropic from "@anthropic-ai/sdk";
+import { createClient as createSupabaseServerClient } from "@/lib/supabase-server";
  
 // ============================================================
 // TYPES
@@ -24,6 +25,7 @@ export interface AIResponse {
  
 export interface DMRequest {
   mode: "dm";
+  businessId: string;
   instructionDoc: string;
   conversationHistory: Message[];
   newMessage: string;
@@ -31,6 +33,7 @@ export interface DMRequest {
  
 export interface LeadRequest {
   mode: "lead";
+  businessId: string;
   instructionDoc: string;
   leadName: string;
   leadEmail: string;
@@ -41,6 +44,7 @@ export interface LeadRequest {
  
 export interface ReviewRequest {
   mode: "review";
+  businessId: string;
   instructionDoc: string;
   customerName: string;
   milestone: string;
@@ -91,13 +95,46 @@ export function detectSpam(message: string): boolean {
 // SYSTEM PROMPTS
 // ============================================================
  
-function buildSystemPrompt(request: AIRequest): string {
+async function getActiveTemporaryNotes(businessId: string): Promise<string[]> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const nowIso = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from("temporary_notes")
+      .select("content")
+      .eq("business_id", businessId)
+      .lte("starts_at", nowIso)
+      .gt("expires_at", nowIso)
+      .order("starts_at", { ascending: false });
+
+    if (error) {
+      console.error("Temporary notes fetch error:", error);
+      return [];
+    }
+
+    return (data ?? [])
+      .map((note) => note.content?.trim())
+      .filter((content): content is string => Boolean(content));
+  } catch (error) {
+    console.error("Temporary notes client error:", error);
+    return [];
+  }
+}
+
+async function buildSystemPrompt(request: AIRequest): Promise<string> {
   const baseRules = `CRITICAL RULES:
 1. You ONLY answer questions using information from the INSTRUCTION DOCUMENT below. Do NOT make up information, guess, or use general knowledge.
 2. If a question cannot be answered from the instruction document, you MUST start your response with exactly "[UNSURE]" followed by a brief, friendly explanation that you'll get someone to help.
 3. Never mention that you are an AI, a bot, or that you're reading from a document. Respond as if you are a friendly staff member.
 4. Match the tone described in the instruction document.
 5. Never share internal business information not meant for customers (like pricing margins, staff details, etc.).`;
+
+  const activeTemporaryNotes = await getActiveTemporaryNotes(request.businessId);
+  const temporaryUpdatesSection =
+    activeTemporaryNotes.length > 0
+      ? `\n\nTEMPORARY UPDATES (these OVERRIDE any conflicting information above. If a temporary note contradicts the main instruction document, always use the temporary note instead):\n${activeTemporaryNotes.map((note) => `- ${note}`).join("\n")}`
+      : "";
  
   switch (request.mode) {
     case "dm":
@@ -106,7 +143,7 @@ function buildSystemPrompt(request: AIRequest): string {
 ${baseRules}
  
 INSTRUCTION DOCUMENT:
-${request.instructionDoc}`;
+${request.instructionDoc}${temporaryUpdatesSection}`;
  
     case "lead":
       return `You are writing a follow-up email to a potential customer who submitted a contact form on the business website. Your goal is to convert them into a paying customer.
@@ -125,7 +162,7 @@ Guidelines:
 ${baseRules}
  
 INSTRUCTION DOCUMENT:
-${request.instructionDoc}`;
+${request.instructionDoc}${temporaryUpdatesSection}`;
  
     case "review":
       return `You are writing a personalized review request message to a valued customer. Your goal is to get them to leave a Google review.
@@ -140,7 +177,7 @@ Guidelines:
 ${baseRules}
  
 INSTRUCTION DOCUMENT:
-${request.instructionDoc}`;
+${request.instructionDoc}${temporaryUpdatesSection}`;
   }
 }
  
@@ -210,7 +247,7 @@ export async function callAIEngine(request: AIRequest): Promise<AIResponse> {
   }
  
   try {
-    const systemPrompt = buildSystemPrompt(request);
+    const systemPrompt = await buildSystemPrompt(request);
     const messages = buildMessages(request);
  
     const response = await getClient().messages.create({

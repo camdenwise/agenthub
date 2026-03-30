@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
  
       const request: DMRequest = {
         mode: "dm",
+        businessId,
         instructionDoc: instructionDoc.content,
         conversationHistory: conversationHistory || [],
         newMessage,
@@ -150,6 +151,7 @@ export async function POST(req: NextRequest) {
  
       const request: LeadRequest = {
         mode: "lead",
+        businessId,
         instructionDoc: instructionDoc.content,
         leadName,
         leadEmail,
@@ -243,6 +245,7 @@ export async function POST(req: NextRequest) {
  
       const request: ReviewRequest = {
         mode: "review",
+        businessId,
         instructionDoc: instructionDoc.content,
         customerName,
         milestone: milestone || "milestone",
