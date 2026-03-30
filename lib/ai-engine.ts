@@ -2,7 +2,7 @@
 // Core AI Engine — powers all three agents (DM responder, Lead agent, Review agent)
  
 import Anthropic from "@anthropic-ai/sdk";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
  
 // ============================================================
 // TYPES
@@ -92,14 +92,23 @@ export function detectSpam(message: string): boolean {
 }
  
 // ============================================================
+// SUPABASE SERVICE CLIENT (bypasses RLS)
+// ============================================================
+
+function getServiceClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
+
+// ============================================================
 // SYSTEM PROMPTS
 // ============================================================
  
-async function getActiveTemporaryNotes(
-  supabase: SupabaseClient,
-  businessId: string
-): Promise<string[]> {
+async function getActiveTemporaryNotes(businessId: string): Promise<string[]> {
   try {
+    const supabase = getServiceClient();
     const nowIso = new Date().toISOString();
 
     const { data, error } = await supabase
@@ -124,19 +133,22 @@ async function getActiveTemporaryNotes(
   }
 }
 
-async function buildSystemPrompt(request: AIRequest, supabase: SupabaseClient): Promise<string> {
-  const baseRules = `CRITICAL RULES:
-1. You ONLY answer questions using information from the INSTRUCTION DOCUMENT below. Do NOT make up information, guess, or use general knowledge.
-2. If a question cannot be answered from the instruction document, you MUST start your response with exactly "[UNSURE]" followed by a brief, friendly explanation that you'll get someone to help.
-3. Never mention that you are an AI, a bot, or that you're reading from a document. Respond as if you are a friendly staff member.
-4. Match the tone described in the instruction document.
-5. Never share internal business information not meant for customers (like pricing margins, staff details, etc.).`;
+async function buildSystemPrompt(request: AIRequest): Promise<string> {
+  const activeTemporaryNotes = await getActiveTemporaryNotes(request.businessId);
+  console.log("TEMP NOTES DEBUG:", activeTemporaryNotes);
 
-  const activeTemporaryNotes = await getActiveTemporaryNotes(supabase, request.businessId);
   const temporaryUpdatesSection =
     activeTemporaryNotes.length > 0
-      ? `\n\nTEMPORARY UPDATES (these OVERRIDE any conflicting information above. If a temporary note contradicts the main instruction document, always use the temporary note instead):\n${activeTemporaryNotes.map((note) => `- ${note}`).join("\n")}`
+      ? `\n\nIMPORTANT CURRENT UPDATES:\n${activeTemporaryNotes.map((note) => `- ${note}`).join("\n")}\n`
       : "";
+
+  const baseRules = `CRITICAL RULES:
+1. You ONLY answer questions using information from the INSTRUCTION DOCUMENT below. Do NOT make up information, guess, or use general knowledge.
+2. If the instruction document contains an "IMPORTANT CURRENT UPDATES" section, that information is the most current and accurate. It ALWAYS overrides and replaces any conflicting information elsewhere in the document. When a current update contradicts other information (such as hours, closures, schedules, or promotions), answer using ONLY the current update — do NOT flag it as a conflict or say you are unsure.
+3. If a question cannot be answered from the instruction document (including current updates), you MUST start your response with exactly "[UNSURE]" followed by a brief, friendly explanation that you'll get someone to help.
+4. Never mention that you are an AI, a bot, or that you're reading from a document. Respond as if you are a friendly staff member.
+5. Match the tone described in the instruction document.
+6. Never share internal business information not meant for customers (like pricing margins, staff details, etc.).`;
  
   switch (request.mode) {
     case "dm":
@@ -145,7 +157,7 @@ async function buildSystemPrompt(request: AIRequest, supabase: SupabaseClient): 
 ${baseRules}
  
 INSTRUCTION DOCUMENT:
-${request.instructionDoc}${temporaryUpdatesSection}`;
+${temporaryUpdatesSection}${request.instructionDoc}`;
  
     case "lead":
       return `You are writing a follow-up email to a potential customer who submitted a contact form on the business website. Your goal is to convert them into a paying customer.
@@ -164,7 +176,7 @@ Guidelines:
 ${baseRules}
  
 INSTRUCTION DOCUMENT:
-${request.instructionDoc}${temporaryUpdatesSection}`;
+${temporaryUpdatesSection}${request.instructionDoc}`;
  
     case "review":
       return `You are writing a personalized review request message to a valued customer. Your goal is to get them to leave a Google review.
@@ -179,7 +191,7 @@ Guidelines:
 ${baseRules}
  
 INSTRUCTION DOCUMENT:
-${request.instructionDoc}${temporaryUpdatesSection}`;
+${temporaryUpdatesSection}${request.instructionDoc}`;
   }
 }
  
@@ -249,12 +261,7 @@ export async function callAIEngine(request: AIRequest): Promise<AIResponse> {
   }
  
   try {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    const systemPrompt = await buildSystemPrompt(request, supabase);
+    const systemPrompt = await buildSystemPrompt(request);
     const messages = buildMessages(request);
  
     const response = await getClient().messages.create({
