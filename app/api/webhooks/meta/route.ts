@@ -230,6 +230,7 @@ async function processIncomingMessage(params: ProcessMessageParams) {
   // Call AI engine
   const aiResult = await callAIEngine({
     mode: "dm",
+    businessId,
     instructionDoc: instructionDoc.content,
     conversationHistory: conversation.messages.slice(0, -1), // everything before the new message
     newMessage: messageText,

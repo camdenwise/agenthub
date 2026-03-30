@@ -9,6 +9,8 @@ dotenv.config({ path: ".env.local" });
  
 import { callAIEngine, detectSpam, parseLeadEmail } from "../lib/ai-engine";
  
+const TEST_BUSINESS_ID = "00000000-0000-0000-0000-000000000000";
+
 const INSTRUCTION_DOC = `Business: Iron Temple Gym
 Location: 4521 Trade Street, Charlotte, NC 28203
 Website: www.irontemple.com
@@ -89,6 +91,7 @@ async function runTests() {
   console.log("\nTest 1: Hours question");
   const dm1 = await callAIEngine({
     mode: "dm",
+    businessId: TEST_BUSINESS_ID,
     instructionDoc: INSTRUCTION_DOC,
     conversationHistory: [],
     newMessage: "What time do you open on Saturday?",
@@ -101,6 +104,7 @@ async function runTests() {
   console.log("\nTest 2: Pricing question");
   const dm2 = await callAIEngine({
     mode: "dm",
+    businessId: TEST_BUSINESS_ID,
     instructionDoc: INSTRUCTION_DOC,
     conversationHistory: [],
     newMessage: "How much is a monthly membership?",
@@ -113,6 +117,7 @@ async function runTests() {
   console.log("\nTest 3: Off-topic question (should trigger UNSURE)");
   const dm3 = await callAIEngine({
     mode: "dm",
+    businessId: TEST_BUSINESS_ID,
     instructionDoc: INSTRUCTION_DOC,
     conversationHistory: [],
     newMessage: "Do you sell pre-workout supplements at the front desk?",
@@ -125,6 +130,7 @@ async function runTests() {
   console.log("\nTest 4: Follow-up question with conversation history");
   const dm4 = await callAIEngine({
     mode: "dm",
+    businessId: TEST_BUSINESS_ID,
     instructionDoc: INSTRUCTION_DOC,
     conversationHistory: [
       { role: "customer", content: "Hi! I'm thinking about joining." },
@@ -142,6 +148,7 @@ async function runTests() {
  
   const lead1 = await callAIEngine({
     mode: "lead",
+    businessId: TEST_BUSINESS_ID,
     instructionDoc: INSTRUCTION_DOC,
     leadName: "David Park",
     leadEmail: "david.p@gmail.com",
@@ -162,6 +169,7 @@ async function runTests() {
  
   const review1 = await callAIEngine({
     mode: "review",
+    businessId: TEST_BUSINESS_ID,
     instructionDoc: INSTRUCTION_DOC,
     customerName: "Taylor Wright",
     milestone: "10th visit",

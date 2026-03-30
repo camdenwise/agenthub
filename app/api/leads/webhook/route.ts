@@ -80,6 +80,7 @@ export async function POST(req: NextRequest) {
     if (instructionDoc?.content) {
       const aiResult = await callAIEngine({
         mode: "lead",
+        businessId,
         instructionDoc: instructionDoc.content,
         leadName: name,
         leadEmail: email,
