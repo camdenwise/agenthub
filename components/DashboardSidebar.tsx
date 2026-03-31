@@ -1,6 +1,7 @@
 'use client'
 
 import { DASHBOARD_NAV } from '@/lib/dashboard-nav'
+import { useAdmin } from '@/lib/admin-context'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LogoutButton } from './LogoutButton'
@@ -51,6 +52,8 @@ export function DashboardSidebar({
   unreadMessagesCount = 0,
 }: DashboardSidebarProps) {
   const pathname = usePathname()
+  const { activeBusiness } = useAdmin()
+  const displayBusinessName = activeBusiness?.name || businessName
 
   return (
     <aside className="flex h-screen w-[230px] flex-col bg-[#0f1729]">
@@ -96,13 +99,13 @@ export function DashboardSidebar({
 
       {/* Business + logout at bottom */}
       <div className="border-t border-slate-700/50 px-4 py-4">
-        {businessName && (
+        {displayBusinessName && (
           <div className="mb-3 flex items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-sm font-medium text-white">
-              {businessName.slice(0, 2).toUpperCase()}
+              {displayBusinessName.slice(0, 2).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-white">{businessName}</p>
+              <p className="truncate text-sm font-medium text-white">{displayBusinessName}</p>
               {businessLocation && (
                 <p className="truncate text-xs text-slate-400">{businessLocation}</p>
               )}
